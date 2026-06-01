@@ -1,0 +1,1177 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ==================== ENUMS ====================
+
+enum Language {
+  FR
+  EN
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  BLOCKED
+  CLOSED
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+  SALARY_PAYMENT
+  LOAN_DISBURSEMENT
+  LOAN_REPAYMENT
+  CONTRIBUTION_PAYMENT
+  FEE
+  INTEREST
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum MobileMoneyProvider {
+  ORANGE_MONEY
+  MTN_MOMO
+  EXPRESS_UNION
+}
+
+enum CreditStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  DISBURSED
+  ACTIVE
+  COMPLETED
+  DEFAULTED
+  RESTRUCTURED
+  WRITTEN_OFF
+}
+
+enum RepaymentStatus {
+  PENDING
+  PAID
+  PARTIAL
+  LATE
+  DEFAULTED
+  WRITTEN_OFF
+}
+
+enum ContributionFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum IdDocumentType {
+  CNI
+  PASSPORT
+  RESIDENCE_PERMIT
+  RECEPISSE
+}
+
+enum ClientType {
+  PHYSIQUE
+  MORALE
+}
+
+enum FormeJuridique {
+  SA
+  SARL
+  SAS
+  ASSOCIATION
+  GIE
+  COOPERATIVE
+}
+
+enum MandataireRole {
+  GERANT
+  PRESIDENT
+  SECRETAIRE_GENERAL
+  TRESORIER
+  DIRECTEUR
+}
+
+enum SignatureRule {
+  SINGLE
+  JOINT
+}
+
+enum GuaranteeType {
+  REAL_ESTATE
+  ENDORSEMENT
+  PLEDGE
+  BLOCKED_SAVINGS
+  SALARY_GUARANTEE
+  VEHICLE
+  EQUIPMENT
+  STOCK
+  PERSONAL_GUARANTEE
+  JOINT_GUARANTEE
+  OTHER
+}
+
+enum ValidationLevel {
+  AGENT
+  AGENCY_MANAGER
+  REGIONAL_DIRECTOR
+  GENERAL_DIRECTOR
+  CREDIT_COMMITTEE
+}
+
+// ==================== AGENCES ====================
+
+model Agency {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique
+  address     String
+  city        String
+  region      String
+  phone       String
+  email       String?
+  isActive    Boolean  @default(true)
+  parentId    String?
+  parent      Agency?  @relation("AgencyHierarchy", fields: [parentId], references: [id])
+  children    Agency[] @relation("AgencyHierarchy")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  clients     Client[]
+  accounts    Account[]
+  transactions Transaction[]
+  savingsAccounts SavingsAccount[]
+  cashRegisters   CashRegister[]
+  journalEntries  JournalEntry[] @relation("JournalAgency")
+  tontineGroups   TontineGroup[]
+  vault           Vault?
+  billPayments    BillPayment[]
+  callboxes       Callbox[]
+
+  @@map("agencies")
+}
+
+// ==================== ROLES & PERMISSIONS ====================
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false)
+  maxTransactionAmount Decimal? @db.Decimal(15, 0)
+  sessionTimeout       Int      @default(30)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       User[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id       String   @id @default(uuid())
+  module   String
+  action   String
+  description String?
+
+  roles    RolePermission[]
+
+  @@unique([module, action])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ==================== UTILISATEURS (Staff) ====================
+
+model User {
+  id            String        @id @default(uuid())
+  email         String        @unique
+  phone         String        @unique
+  password      String
+  firstName     String
+  lastName      String
+  roleId        String
+  role          Role          @relation(fields: [roleId], references: [id])
+  agencyId      String?
+  agency        Agency?       @relation(fields: [agencyId], references: [id])
+  isActive      Boolean       @default(true)
+  language      Language      @default(FR)
+  lastLoginAt   DateTime?
+  twoFactorSecret   String?
+  twoFactorEnabled  Boolean       @default(false)
+  sessionToken      String?       @db.VarChar(64)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  auditLogs     AuditLog[]
+  creditValidations CreditValidation[]
+  cashRegisters     CashRegister[]
+  vaultMovementsRequested VaultMovement[] @relation("VaultMovementRequester")
+  vaultMovementsApproved  VaultMovement[] @relation("VaultMovementApprover")
+  billPayments    BillPayment[]
+
+  @@map("users")
+}
+
+// ==================== CLIENTS ====================
+
+model Client {
+  id              String          @id @default(uuid())
+  clientNumber    String          @unique
+  clientType      ClientType      @default(PHYSIQUE)
+
+  // === Champs communs ===
+  phone           String          @unique
+  email           String?
+  address         String
+  city            String
+  region          String
+  language        Language        @default(FR)
+  status          AccountStatus   @default(ACTIVE)
+  kycVerified     Boolean         @default(false)
+  kycScore        Int?
+  kycScoreLabel   String?         @db.VarChar(20)
+  agencyId        String
+  agency          Agency          @relation(fields: [agencyId], references: [id])
+  qrCode          String?         @unique
+  pin             String?
+  password        String?
+  sessionToken    String?         @db.VarChar(64)
+  twoFactorSecret String?
+  twoFactorEnabled Boolean        @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // === Personne Physique ===
+  firstName       String?
+  lastName        String?
+  gender          Gender?
+  dateOfBirth     DateTime?
+  lieuNaissance   String?
+  idDocumentType  IdDocumentType?
+  idDocumentNumber String?        @unique
+  idDocumentPhoto  String?
+  dateExpirationPiece DateTime?
+  profilePhoto    String?   @db.LongText
+  signatureData   String?   @db.LongText
+  signatureData2  String?   @db.LongText
+  signatureData3  String?   @db.LongText
+  isPEP           Boolean         @default(false)
+  profession      String?
+  secteurActivite String?
+  revenuMensuel   Decimal?        @db.Decimal(15, 0)
+  phoneSecondaire String?
+  companyId       String?
+  company         Company?        @relation(fields: [companyId], references: [id])
+
+  // === Personne Morale ===
+  raisonSociale       String?
+  formeJuridique      FormeJuridique?
+  numeroEnregistrement String?
+  identifiantFiscal   String?
+  dateConstitution    DateTime?
+  signatureRule       SignatureRule    @default(SINGLE)
+
+  // === Relations ===
+  accounts        Account[]
+  credits         Credit[]
+  savingsAccounts SavingsAccount[]
+  mandatairesDe   Mandataire[]    @relation("MandatairePhysique")
+  mandataires     Mandataire[]    @relation("MandataireMorale")
+  tontineMemberships TontineMember[]
+  savingsGoals    SavingsGoal[]
+
+  @@map("clients")
+}
+
+model Mandataire {
+  id                String          @id @default(uuid())
+  clientMoraleId    String
+  clientMorale      Client          @relation("MandataireMorale", fields: [clientMoraleId], references: [id], onDelete: Cascade)
+  clientPhysiqueId  String
+  clientPhysique    Client          @relation("MandatairePhysique", fields: [clientPhysiqueId], references: [id])
+  role              MandataireRole
+  isSignataire      Boolean         @default(false)
+  maxOperationAmount Decimal?       @db.Decimal(15, 0)
+  signatureUrl      String?
+  documentUrl       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@unique([clientMoraleId, clientPhysiqueId])
+  @@index([clientMoraleId])
+  @@index([clientPhysiqueId])
+  @@map("mandataires")
+}
+
+// ==================== PRODUITS DE COMPTE ====================
+
+model AccountProduct {
+  id                  String   @id @default(uuid())
+  code                String   @unique
+  name                String
+  type                String   // CURRENT, SAVINGS, DAT, COLLECTE
+  description         String?
+  interestRate        Decimal  @default(0) @db.Decimal(5, 2)
+  minOpeningDeposit   Decimal  @default(0) @db.Decimal(15, 0)
+  openingFees         Decimal  @default(0) @db.Decimal(15, 0)
+  minBalance          Decimal  @default(0) @db.Decimal(15, 0)
+  maintenanceFees     Decimal  @default(0) @db.Decimal(15, 0)
+  maintenanceFrequency String? // MONTHLY, QUARTERLY, YEARLY
+  lockDurationMonths  Int      @default(0)
+  earlyWithdrawalPenalty Decimal @default(0) @db.Decimal(5, 2)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  accounts            Account[]
+
+  @@map("account_products")
+}
+
+// ==================== COMPTES ====================
+
+model Account {
+  id            String        @id @default(uuid())
+  accountNumber String        @unique
+  clientId      String
+  client        Client        @relation(fields: [clientId], references: [id])
+  agencyId      String
+  agency        Agency        @relation(fields: [agencyId], references: [id])
+  productId     String?
+  product       AccountProduct? @relation(fields: [productId], references: [id])
+  type          String        @default("CURRENT")
+  balance       Decimal       @default(0) @db.Decimal(15, 0)
+  status        AccountStatus @default(ACTIVE)
+  interestRate  Decimal?      @db.Decimal(5, 2)
+  maturityDate  DateTime?
+  managerId     String?
+  currency      String        @default("XAF")
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  transactionsFrom Transaction[] @relation("FromAccount")
+  transactionsTo   Transaction[] @relation("ToAccount")
+  checkbooks       Checkbook[]
+  billPayments     BillPayment[]
+
+  @@map("accounts")
+}
+
+// ==================== TRANSACTIONS ====================
+
+model Transaction {
+  id                String            @id @default(uuid())
+  reference         String            @unique
+  type              TransactionType
+  amount            Decimal           @db.Decimal(15, 0)
+  fees              Decimal           @default(0) @db.Decimal(15, 0)
+  tax               Decimal           @default(0) @db.Decimal(15, 0)
+  fromAccountId     String?
+  fromAccount       Account?          @relation("FromAccount", fields: [fromAccountId], references: [id])
+  toAccountId       String?
+  toAccount         Account?          @relation("ToAccount", fields: [toAccountId], references: [id])
+  mobileMoneyProvider MobileMoneyProvider?
+  mobileMoneyPhone    String?
+  mobileMoneyRef      String?
+  agencyId          String
+  agency            Agency            @relation(fields: [agencyId], references: [id])
+  status            TransactionStatus @default(PENDING)
+  description       String?
+  // Signataire pour comptes Personne Morale
+  signataireId      String?
+  signataireVerifie Boolean           @default(false)
+  // Virement externe Maker-Checker
+  destinationBank         String?
+  destinationAccountNumber String?
+  beneficiaryName         String?
+  motif                   String?
+  approvedById            String?
+  approvedAt              DateTime?
+  rejectedReason          String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([createdAt])
+  @@index([fromAccountId])
+  @@index([toAccountId])
+  @@map("transactions")
+}
+
+// ==================== PRODUITS DE CREDIT ====================
+
+model CreditProduct {
+  id                  String   @id @default(uuid())
+  name                String   @unique
+  code                String   @unique
+  description         String?
+  minAmount           Decimal  @db.Decimal(15, 0)
+  maxAmount           Decimal  @db.Decimal(15, 0)
+  minDurationMonths   Int
+  maxDurationMonths   Int
+  interestRate        Decimal  @db.Decimal(5, 2)
+  repaymentType       String   @default("CONSTANT") // CONSTANT ou DEGRESSIVE
+  applicationFeeType  String   @default("PERCENTAGE") // PERCENTAGE ou FIXED
+  applicationFeeValue Decimal  @default(0) @db.Decimal(15, 2)
+  insuranceRate       Decimal  @default(0) @db.Decimal(5, 2) // % du capital
+  latePaymentRate     Decimal  @default(0.1) @db.Decimal(5, 3) // taux moratoire journalier %
+  gracePeriodMonths   Int      @default(0)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  credits             Credit[]
+
+  @@map("credit_products")
+}
+
+// ==================== CREDITS ====================
+
+model Credit {
+  id                String        @id @default(uuid())
+  creditNumber      String        @unique
+  clientId          String
+  client            Client        @relation(fields: [clientId], references: [id])
+  creditProductId   String?
+  creditProduct     CreditProduct? @relation(fields: [creditProductId], references: [id])
+  amount            Decimal       @db.Decimal(15, 0)
+  interestRate      Decimal       @db.Decimal(5, 2)
+  durationMonths    Int
+  monthlyPayment    Decimal       @db.Decimal(15, 0)
+  totalAmount       Decimal       @db.Decimal(15, 0)
+  remainingAmount   Decimal       @db.Decimal(15, 0)
+  purpose           String
+  status            CreditStatus  @default(DRAFT)
+  currentValidationLevel ValidationLevel @default(AGENT)
+  disbursedAt       DateTime?
+  completedAt       DateTime?
+  restructuredFromId String?
+  restructuredAt    DateTime?
+  scoringTotal      Int?
+  scoringDetails    Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  restructuredFrom  Credit?       @relation("Restructuration", fields: [restructuredFromId], references: [id])
+  restructuredTo    Credit[]      @relation("Restructuration")
+  guarantees        Guarantee[]
+  repayments        Repayment[]
+  validations       CreditValidation[]
+
+  @@index([clientId])
+  @@index([status])
+  @@map("credits")
+}
+
+model Guarantee {
+  id          String        @id @default(uuid())
+  creditId    String
+  credit      Credit        @relation(fields: [creditId], references: [id], onDelete: Cascade)
+  type        GuaranteeType
+  description String
+  value       Decimal       @db.Decimal(15, 0)
+  documentUrl String?
+  createdAt   DateTime      @default(now())
+
+  @@map("guarantees")
+}
+
+model Repayment {
+  id          String          @id @default(uuid())
+  creditId    String
+  credit      Credit          @relation(fields: [creditId], references: [id])
+  dueDate     DateTime
+  amount      Decimal         @db.Decimal(15, 0)
+  paidAmount  Decimal         @default(0) @db.Decimal(15, 0)
+  penalty     Decimal         @default(0) @db.Decimal(15, 0)
+  moratoireAmount   Decimal   @default(0) @db.Decimal(15, 0)  // interets moratoires accumules
+  status      RepaymentStatus @default(PENDING)
+  paidAt      DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([creditId])
+  @@index([dueDate])
+  @@map("repayments")
+}
+
+model CreditValidation {
+  id        String          @id @default(uuid())
+  creditId  String
+  credit    Credit          @relation(fields: [creditId], references: [id])
+  level     ValidationLevel
+  userId    String
+  user      User            @relation(fields: [userId], references: [id])
+  approved  Boolean
+  comment   String?
+  createdAt DateTime        @default(now())
+
+  @@map("credit_validations")
+}
+
+// ==================== EPARGNE, CAISSE & PRODUITS ====================
+
+model SavingsProduct {
+  id                    String                 @id @default(uuid())
+  name                  String                 @unique
+  description           String?
+  interestRate          Decimal                @db.Decimal(5, 2)
+  minDeposit            Decimal                @default(500) @db.Decimal(15, 0)
+  minBalance            Decimal                @default(0) @db.Decimal(15, 0)
+  lockDurationMonths    Int                    @default(0)
+  earlyWithdrawalPenalty Decimal               @default(0) @db.Decimal(5, 2)
+  contributionFrequency ContributionFrequency?
+  contributionAmount    Decimal?               @db.Decimal(15, 0)
+  isActive              Boolean                @default(true)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  savingsAccounts       SavingsAccount[]
+
+  @@map("savings_products")
+}
+
+model SavingsAccount {
+  id              String         @id @default(uuid())
+  accountNumber   String         @unique
+  clientId        String
+  client          Client         @relation(fields: [clientId], references: [id])
+  productId       String
+  product         SavingsProduct @relation(fields: [productId], references: [id])
+  agencyId        String
+  agency          Agency         @relation(fields: [agencyId], references: [id])
+  balance         Decimal        @default(0) @db.Decimal(15, 0)
+  totalDeposits   Decimal        @default(0) @db.Decimal(15, 0)
+  totalWithdrawals Decimal       @default(0) @db.Decimal(15, 0)
+  interestEarned  Decimal        @default(0) @db.Decimal(15, 0)
+  status          AccountStatus  @default(ACTIVE)
+  nextContributionDate DateTime?
+  maturityDate    DateTime?
+  openedAt        DateTime       @default(now())
+  closedAt        DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  contributions   SavingsContribution[]
+  savingsGoals    SavingsGoal[]
+
+  @@index([clientId])
+  @@map("savings_accounts")
+}
+
+model SavingsContribution {
+  id                  String              @id @default(uuid())
+  savingsAccountId    String
+  savingsAccount      SavingsAccount      @relation(fields: [savingsAccountId], references: [id])
+  type                String              // DEPOSIT, WITHDRAWAL, INTEREST
+  amount              Decimal             @db.Decimal(15, 0)
+  balanceAfter        Decimal             @db.Decimal(15, 0)
+  mobileMoneyProvider MobileMoneyProvider?
+  mobileMoneyPhone    String?
+  mobileMoneyRef      String?
+  description         String?
+  createdAt           DateTime            @default(now())
+
+  @@index([savingsAccountId])
+  @@index([createdAt])
+  @@map("savings_contributions")
+}
+
+model CashRegister {
+  id              String    @id @default(uuid())
+  agencyId        String
+  agency          Agency    @relation(fields: [agencyId], references: [id])
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+  openingBalance  Decimal   @db.Decimal(15, 0)
+  closingBalance  Decimal?  @db.Decimal(15, 0)
+  physicalBalance Decimal?  @db.Decimal(15, 0)
+  difference      Decimal?  @db.Decimal(15, 0)
+  totalDeposits   Decimal   @default(0) @db.Decimal(15, 0)
+  totalWithdrawals Decimal  @default(0) @db.Decimal(15, 0)
+  cashCeiling     Decimal?  @db.Decimal(15, 0)
+  status          String    @default("OPEN") // OPEN, CLOSED
+  notes           String?
+  openedAt        DateTime  @default(now())
+  closedAt        DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  vaultMovements  VaultMovement[]
+
+  @@index([agencyId])
+  @@index([userId])
+  @@map("cash_registers")
+}
+
+// ==================== COFFRE-FORT AGENCE ====================
+
+enum VaultMovementType {
+  DEPOSIT_TO_VAULT    // Delestage caisse -> coffre
+  WITHDRAWAL_FROM_VAULT // Approvisionnement coffre -> caisse
+}
+
+enum VaultMovementStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Vault {
+  id          String   @id @default(uuid())
+  agencyId    String   @unique
+  agency      Agency   @relation(fields: [agencyId], references: [id])
+  balance     Decimal  @default(0) @db.Decimal(15, 0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  movements   VaultMovement[]
+
+  @@map("vaults")
+}
+
+model VaultMovement {
+  id              String              @id @default(uuid())
+  vaultId         String
+  vault           Vault               @relation(fields: [vaultId], references: [id])
+  cashRegisterId  String
+  cashRegister    CashRegister        @relation(fields: [cashRegisterId], references: [id])
+  type            VaultMovementType
+  amount          Decimal             @db.Decimal(15, 0)
+  status          VaultMovementStatus @default(PENDING)
+  requestedById   String
+  requestedBy     User                @relation("VaultMovementRequester", fields: [requestedById], references: [id])
+  approvedById    String?
+  approvedBy      User?               @relation("VaultMovementApprover", fields: [approvedById], references: [id])
+  approvedAt      DateTime?
+  rejectedReason  String?
+  notes           String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([vaultId])
+  @@index([cashRegisterId])
+  @@map("vault_movements")
+}
+
+// ==================== CHEQUIERS & OPPOSITION ====================
+
+enum ChequeStatus {
+  DISPONIBLE
+  EMIS
+  ENCAISSE
+  OPPOSITION
+}
+
+model Checkbook {
+  id            String   @id @default(uuid())
+  accountId     String
+  account       Account  @relation(fields: [accountId], references: [id])
+  seriesStart   Int
+  seriesEnd     Int
+  totalLeaves   Int      // 25 ou 50
+  status        String   @default("ACTIVE") // ACTIVE, EXHAUSTED, CANCELLED
+  requestedAt   DateTime @default(now())
+  deliveredAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  cheques       Cheque[]
+
+  @@index([accountId])
+  @@map("checkbooks")
+}
+
+model Cheque {
+  id            String       @id @default(uuid())
+  checkbookId   String
+  checkbook     Checkbook    @relation(fields: [checkbookId], references: [id], onDelete: Cascade)
+  chequeNumber  String       @unique
+  amount        Decimal?     @db.Decimal(15, 0)
+  beneficiary   String?
+  status        ChequeStatus @default(DISPONIBLE)
+  emittedAt     DateTime?
+  encaisseAt    DateTime?
+  oppositionAt  DateTime?
+  oppositionMotif String?    // PERTE, VOL, LITIGE
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([checkbookId])
+  @@index([status])
+  @@map("cheques")
+}
+
+// ==================== TONTINE ROTATIVE ====================
+
+enum TontineGroupStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model TontineGroup {
+  id                  String              @id @default(uuid())
+  name                String
+  description         String?
+  contributionAmount  Decimal             @db.Decimal(15, 0)
+  frequency           ContributionFrequency
+  maxMembers          Int
+  status              TontineGroupStatus  @default(ACTIVE)
+  currentRound        Int                 @default(0)
+  totalRounds         Int
+  agencyId            String
+  agency              Agency              @relation(fields: [agencyId], references: [id])
+  createdById         String
+  startDate           DateTime?
+  nextCollectDate     DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  members             TontineMember[]
+  rounds              TontineRound[]
+
+  @@index([agencyId])
+  @@map("tontine_groups")
+}
+
+model TontineMember {
+  id            String        @id @default(uuid())
+  groupId       String
+  group         TontineGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  clientId      String
+  client        Client        @relation(fields: [clientId], references: [id])
+  order         Int           // Ordre dans la rotation
+  isActive      Boolean       @default(true)
+  totalPaid     Decimal       @default(0) @db.Decimal(15, 0)
+  totalReceived Decimal       @default(0) @db.Decimal(15, 0)
+  penaltyAmount Decimal       @default(0) @db.Decimal(15, 0)
+  joinedAt      DateTime      @default(now())
+
+  payments      TontinePayment[]
+
+  @@unique([groupId, clientId])
+  @@unique([groupId, order])
+  @@index([clientId])
+  @@map("tontine_members")
+}
+
+model TontineRound {
+  id              String        @id @default(uuid())
+  groupId         String
+  group           TontineGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  roundNumber     Int
+  beneficiaryId   String        // TontineMember.id du beneficiaire
+  dueDate         DateTime
+  totalCollected  Decimal       @default(0) @db.Decimal(15, 0)
+  disbursedAmount Decimal       @default(0) @db.Decimal(15, 0)
+  isDisbursed     Boolean       @default(false)
+  disbursedAt     DateTime?
+  createdAt       DateTime      @default(now())
+
+  payments        TontinePayment[]
+
+  @@unique([groupId, roundNumber])
+  @@index([groupId])
+  @@map("tontine_rounds")
+}
+
+model TontinePayment {
+  id          String        @id @default(uuid())
+  roundId     String
+  round       TontineRound  @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  memberId    String
+  member      TontineMember @relation(fields: [memberId], references: [id])
+  amount      Decimal       @db.Decimal(15, 0)
+  penalty     Decimal       @default(0) @db.Decimal(15, 0)
+  isPaid      Boolean       @default(false)
+  paidAt      DateTime?
+  createdAt   DateTime      @default(now())
+
+  @@unique([roundId, memberId])
+  @@index([memberId])
+  @@map("tontine_payments")
+}
+
+// ==================== EPARGNE OBJECTIF ====================
+
+model SavingsGoal {
+  id              String         @id @default(uuid())
+  clientId        String
+  client          Client         @relation(fields: [clientId], references: [id])
+  savingsAccountId String
+  savingsAccount  SavingsAccount @relation(fields: [savingsAccountId], references: [id])
+  name            String         // ex: Mariage, Scolarite, Pelerinage
+  targetAmount    Decimal        @db.Decimal(15, 0)
+  currentAmount   Decimal        @default(0) @db.Decimal(15, 0)
+  targetDate      DateTime
+  autoDebit       Boolean        @default(false)
+  autoDebitAmount Decimal?       @db.Decimal(15, 0)
+  autoDebitFrequency ContributionFrequency?
+  bonusRate       Decimal        @default(0) @db.Decimal(5, 2) // Taux bonus si objectif atteint
+  isCompleted     Boolean        @default(false)
+  completedAt     DateTime?
+  isUnlocked      Boolean        @default(false)
+  unlockedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([clientId])
+  @@index([savingsAccountId])
+  @@map("savings_goals")
+}
+
+// ==================== CONFIGURATION FRAIS ====================
+
+model FeeConfig {
+  id              String   @id @default(uuid())
+  name            String
+  transactionType String   // DEPOSIT, WITHDRAWAL, TRANSFER, EXTERNAL_TRANSFER
+  channel         String   @default("ALL") // ALL, CASH, ORANGE_MONEY, MTN_MOMO, EXPRESS_UNION
+  feeType         String   @default("PERCENTAGE") // PERCENTAGE or FIXED
+  feeValue        Decimal  @db.Decimal(15, 2) // ex: 1.00 for 1%, or 500 for fixed 500 FCFA
+  minFee          Decimal  @default(0) @db.Decimal(15, 0)
+  maxFee          Decimal  @default(0) @db.Decimal(15, 0) // 0 = no max
+  taxRate         Decimal  @default(19.25) @db.Decimal(5, 2) // TVA rate
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([transactionType, channel])
+  @@map("fee_configs")
+}
+
+// ==================== ENTREPRISES & SALAIRES ====================
+
+model Company {
+  id              String    @id @default(uuid())
+  name            String
+  registrationNumber String @unique
+  address         String
+  city            String
+  phone           String
+  email           String?
+  contactPerson   String
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  employees       Client[]
+  salaryBatches   SalaryBatch[]
+
+  @@map("companies")
+}
+
+model SalaryBatch {
+  id            String    @id @default(uuid())
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id])
+  reference     String    @unique
+  totalAmount   Decimal   @db.Decimal(15, 0)
+  totalEmployees Int
+  fees          Decimal   @default(0) @db.Decimal(15, 0)
+  status        TransactionStatus @default(PENDING)
+  processedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  payments      SalaryPayment[]
+
+  @@index([companyId])
+  @@map("salary_batches")
+}
+
+model SalaryPayment {
+  id            String            @id @default(uuid())
+  batchId       String
+  batch         SalaryBatch       @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  employeeName  String
+  employeePhone String
+  amount        Decimal           @db.Decimal(15, 0)
+  status        TransactionStatus @default(PENDING)
+  processedAt   DateTime?
+  createdAt     DateTime          @default(now())
+
+  @@map("salary_payments")
+}
+
+// ==================== AUDIT ====================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  action      String
+  module      String
+  entityId    String?
+  entityType  String?
+  oldValues   Json?
+  newValues   Json?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([module])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ==================== NOTIFICATIONS ====================
+
+model Notification {
+  id          String   @id @default(uuid())
+  targetType  String
+  targetId    String
+  title       String
+  message     String
+  channel     String
+  isRead      Boolean  @default(false)
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([targetId, targetType])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ==================== COMPTABILITE SYSCOHADA ====================
+
+model AccountPlan {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  parentCode  String?
+  type        String   // ACTIF, PASSIF, CHARGE, PRODUIT
+  level       Int      // 1=classe, 2=compte, 3=sous-compte
+  isActive    Boolean  @default(true)
+  entries     JournalEntry[]
+  createdAt   DateTime @default(now())
+
+  @@index([parentCode])
+  @@map("account_plan")
+}
+
+model JournalEntry {
+  id            String    @id @default(uuid())
+  entryNumber   String    @unique
+  date          DateTime
+  accountId     String
+  account       AccountPlan @relation(fields: [accountId], references: [id])
+  debit         Decimal   @default(0) @db.Decimal(15, 0)
+  credit        Decimal   @default(0) @db.Decimal(15, 0)
+  label         String
+  reference     String?
+  sourceModule  String?   // TRANSACTION, CREDIT, SAVINGS, SALARY
+  sourceId      String?
+  agencyId      String
+  agency        Agency    @relation("JournalAgency", fields: [agencyId], references: [id])
+  periodId      String?
+  period        AccountingPeriod? @relation(fields: [periodId], references: [id])
+  createdById   String?
+  createdAt     DateTime  @default(now())
+
+  @@index([date])
+  @@index([accountId])
+  @@index([agencyId])
+  @@map("journal_entries")
+}
+
+model AccountingPeriod {
+  id        String   @id @default(uuid())
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  status    String   @default("OPEN") // OPEN, CLOSED, LOCKED
+  closedAt  DateTime?
+  closedBy  String?
+  entries   JournalEntry[]
+  createdAt DateTime @default(now())
+
+  @@map("accounting_periods")
+}
+
+// ==================== RAPPROCHEMENT BANCAIRE ====================
+
+model BankStatementLine {
+  id                  String    @id @default(uuid())
+  date                DateTime
+  reference           String?
+  label               String
+  debit               Decimal   @default(0) @db.Decimal(15, 0)
+  credit              Decimal   @default(0) @db.Decimal(15, 0)
+  balance             Decimal?  @db.Decimal(15, 0)
+  matched             Boolean   @default(false)
+  matchedJournalId    String?
+  reconciliationDate  DateTime?
+  createdAt           DateTime  @default(now())
+
+  @@index([date])
+  @@index([matched])
+  @@map("bank_statement_lines")
+}
+
+// ==================== PARAMETRES ====================
+
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  category  String
+  description String?
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ==================== CALLBOX ====================
+
+enum CallboxStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum CallboxTxType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+  FLOAT_TOPUP
+}
+
+model Callbox {
+  id              String        @id @default(uuid())
+  callboxNumber   String        @unique
+  ownerName       String
+  businessName    String?
+  phone           String        @unique
+  email           String        @unique
+  password        String
+  city            String
+  address         String?
+  agencyId        String
+  agency          Agency        @relation(fields: [agencyId], references: [id])
+  float           Decimal       @default(0) @db.Decimal(15, 0)
+  commissionsEarned Decimal     @default(0) @db.Decimal(15, 0)
+  status          CallboxStatus @default(PENDING)
+  approvedById    String?
+  approvedAt      DateTime?
+  createdBy       String?
+  sessionToken    String?       @db.VarChar(64)
+  lastLoginAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  transactions    CallboxTransaction[]
+  floatTopups     CallboxFloatTopup[]
+
+  @@map("callboxes")
+}
+
+model CallboxTransaction {
+  id                String        @id @default(uuid())
+  reference         String        @unique
+  callboxId         String
+  callbox           Callbox       @relation(fields: [callboxId], references: [id])
+  type              CallboxTxType
+  clientAccountId   String?
+  destAccountId     String?
+  clientName        String
+  amount            Decimal       @db.Decimal(15, 0)
+  commission        Decimal       @default(0) @db.Decimal(15, 0)
+  callboxCommission Decimal       @default(0) @db.Decimal(15, 0)
+  gfsCommission     Decimal       @default(0) @db.Decimal(15, 0)
+  status            TransactionStatus @default(COMPLETED)
+  notes             String?
+  createdAt         DateTime      @default(now())
+
+  @@index([callboxId])
+  @@index([createdAt])
+  @@map("callbox_transactions")
+}
+
+model CallboxCommissionConfig {
+  id               String        @id @default(uuid())
+  transactionType  CallboxTxType @unique
+  rate             Decimal       @db.Decimal(6, 4)
+  callboxShareRate Decimal       @db.Decimal(6, 4)
+  isActive         Boolean       @default(true)
+  updatedAt        DateTime      @updatedAt
+
+  @@map("callbox_commission_configs")
+}
+
+model CallboxFloatTopup {
+  id              String   @id @default(uuid())
+  callboxId       String
+  callbox         Callbox  @relation(fields: [callboxId], references: [id])
+  amount          Decimal  @db.Decimal(15, 0)
+  method          String
+  processedById   String?
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  @@index([callboxId])
+  @@map("callbox_float_topups")
+}
+
+// ==================== PAIEMENTS DE FACTURES ====================
+
+model BillPayment {
+  id              String    @id @default(uuid())
+  reference       String    @unique
+  operator        String    // ENEO, CAMWATER, CANAL_PLUS, CAMTEL, DGI, SCHOOL, OTHER
+  billNumber      String    // N° de facture / N° abonné
+  payerName       String    // Nom du payeur (pas forcément client GFS)
+  payerPhone      String?
+  amount          Decimal   @db.Decimal(15, 0)
+  fees            Decimal   @default(0) @db.Decimal(15, 0)
+  paymentMode     String    // CASH, ACCOUNT
+  accountId       String?
+  account         Account?  @relation(fields: [accountId], references: [id])
+  agencyId        String
+  agency          Agency    @relation(fields: [agencyId], references: [id])
+  collectedById   String
+  collectedBy     User      @relation(fields: [collectedById], references: [id])
+  status          String    @default("COLLECTED") // COLLECTED, REVERSED, CANCELLED
+  reversedAt      DateTime?
+  reversedById    String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([operator])
+  @@index([agencyId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("bill_payments")
+}

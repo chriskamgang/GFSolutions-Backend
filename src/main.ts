@@ -1,0 +1,58 @@
+import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { AppModule } from './app.module';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  // Prefix global
+  app.setGlobalPrefix('api/v1');
+
+  // CORS
+  app.enableCors({
+    origin: (origin, callback) => {
+      // Autoriser : file:// (origin=null/undefined), localhost toutes ports, 127.0.0.1
+      if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
+  });
+
+  // Validation
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+
+  // Swagger API Documentation
+  const config = new DocumentBuilder()
+    .setTitle('MicroFinance API')
+    .setDescription('API de gestion de microfinance - Cameroun')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .addTag('Authentification')
+    .addTag('Utilisateurs')
+    .addTag('Clients')
+    .addTag('Comptes')
+    .addTag('Transactions')
+    .addTag('Roles & Permissions')
+    .addTag('Agences')
+    .addTag('Entreprises & Salaires')
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api/docs', app, document);
+
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port);
+  console.log(`API MicroFinance demarree sur http://localhost:${port}`);
+  console.log(`Documentation Swagger: http://localhost:${port}/api/docs`);
+}
+bootstrap();
