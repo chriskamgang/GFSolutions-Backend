@@ -12,8 +12,12 @@ async function bootstrap() {
   // CORS
   app.enableCors({
     origin: (origin, callback) => {
-      // Autoriser : file:// (origin=null/undefined), localhost toutes ports, 127.0.0.1
-      if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+      const allowed = [
+        'https://admin.gfinancials.com',
+        'https://gfinancials.com',
+        'https://www.gfinancials.com',
+      ];
+      if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1') || allowed.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
