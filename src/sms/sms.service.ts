@@ -76,6 +76,8 @@ export class SmsService {
    */
   private formatPhone(phone: string): string {
     const clean = phone.replace(/[\s\-\.+]/g, '');
+    // Corriger le double prefixe 237237XXXXXXXXX
+    if (clean.startsWith('237237')) return clean.slice(3);
     if (clean.startsWith('237')) return clean;
     if (clean.startsWith('6') || clean.startsWith('2')) return `237${clean}`;
     return clean;
