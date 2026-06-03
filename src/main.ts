@@ -4,11 +4,12 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  // Desactiver le bodyParser integre pour pouvoir definir notre propre limite
   const app = await NestFactory.create(AppModule, {
-    bodyParser: true,
+    bodyParser: false,
   });
 
-  // Augmenter la limite pour les photos et signatures en base64
+  // Body parser avec limite 15mb pour les photos et signatures en base64
   app.use(require('express').json({ limit: '15mb' }));
   app.use(require('express').urlencoded({ limit: '15mb', extended: true }));
 
