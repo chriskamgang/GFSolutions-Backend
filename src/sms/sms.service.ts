@@ -1,25 +1,74 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
   private readonly apiUrl = 'https://smsvas.com/bulk/public/index.php/api/v1/sendsms';
   private readonly creditUrl = 'https://smsvas.com/bulk/public/index.php/api/v1/smscredit';
-  private readonly user: string;
-  private readonly password: string;
-  private readonly senderId: string;
-  private readonly enabled: boolean;
+  private user: string;
+  private password: string;
+  private senderId: string;
+  private enabled: boolean;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private prisma: PrismaService,
+  ) {
     this.user = this.configService.get<string>('NEXAH_SMS_USER', '');
     this.password = this.configService.get<string>('NEXAH_SMS_PASSWORD', '');
-    this.senderId = this.configService.get<string>('NEXAH_SMS_SENDER_ID', 'MicroFin');
+    this.senderId = this.configService.get<string>('NEXAH_SMS_SENDER_ID', 'GFS');
     this.enabled = !!this.user && !!this.password;
 
     if (!this.enabled) {
-      this.logger.warn('NEXAH SMS desactive : NEXAH_SMS_USER ou NEXAH_SMS_PASSWORD manquant');
+      this.logger.warn('NEXAH SMS (env) non configure — chargement depuis la base de donnees...');
     }
+  }
+
+  /**
+   * Charge la config SMS depuis la base de donnees (si les env vars sont absentes)
+   */
+  async loadConfigFromDb(): Promise<void> {
+    try {
+      const settings = await this.prisma.setting.findMany({
+        where: { category: 'sms' },
+      });
+      const map: Record<string, string> = {};
+      for (const s of settings) map[s.key] = s.value;
+
+      if (map['nexah_sms_user'] && map['nexah_sms_password']) {
+        this.user = map['nexah_sms_user'];
+        this.password = map['nexah_sms_password'];
+        this.senderId = map['nexah_sms_sender_id'] || 'GFS';
+        this.enabled = map['nexah_sms_enabled'] !== 'false';
+        this.logger.log('Config SMS chargee depuis la base de donnees');
+      }
+    } catch (e) {
+      this.logger.warn('Impossible de charger la config SMS depuis la DB : ' + e.message);
+    }
+  }
+
+  /**
+   * Met a jour la config SMS en memoire et en base
+   */
+  async updateConfig(user: string, password: string, senderId: string, enabled: boolean): Promise<void> {
+    this.user = user;
+    this.password = password;
+    this.senderId = senderId || 'GFS';
+    this.enabled = enabled && !!user && !!password;
+  }
+
+  /**
+   * Retourne la config SMS actuelle (sans le mot de passe en clair)
+   */
+  getConfigStatus(): { configured: boolean; user: string; senderId: string; enabled: boolean } {
+    return {
+      configured: !!this.user && !!this.password,
+      user: this.user,
+      senderId: this.senderId,
+      enabled: this.enabled,
+    };
   }
 
   /**
@@ -36,6 +85,11 @@ export class SmsService {
    * Envoie un SMS via NEXAH API
    */
   async send(phone: string, message: string): Promise<boolean> {
+    // Si pas configure en memoire, essayer de charger depuis la DB
+    if (!this.enabled) {
+      await this.loadConfigFromDb();
+    }
+
     if (!this.enabled) {
       this.logger.debug(`[SMS SIMULE] -> ${phone}: ${message}`);
       return true;

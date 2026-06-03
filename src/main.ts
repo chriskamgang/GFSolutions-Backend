@@ -4,7 +4,13 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    bodyParser: true,
+  });
+
+  // Augmenter la limite pour les photos et signatures en base64
+  app.use(require('express').json({ limit: '15mb' }));
+  app.use(require('express').urlencoded({ limit: '15mb', extended: true }));
 
   // Prefix global
   app.setGlobalPrefix('api/v1');

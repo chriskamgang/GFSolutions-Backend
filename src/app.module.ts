@@ -20,6 +20,7 @@ import { CheckbooksModule } from './checkbooks/checkbooks.module';
 import { TontinesModule } from './tontines/tontines.module';
 import { ClientAuthModule } from './client-auth/client-auth.module';
 import { SmsModule } from './sms/sms.module';
+import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { SavingsGoalsModule } from './savings-goals/savings-goals.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
 import { UssdModule } from './ussd/ussd.module';
@@ -34,6 +35,7 @@ import { CallboxModule } from './callbox/callbox.module';
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     SmsModule,
+    WhatsappModule,
     AuthModule,
     ClientAuthModule,
     UsersModule,

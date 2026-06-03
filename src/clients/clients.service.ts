@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { SmsService } from '../sms/sms.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { CreateClientDto, UpdateClientDto, AddMandataireDto } from './dto/client.dto';
 import { v4 as uuidv4 } from 'uuid';
 import * as bcrypt from 'bcrypt';
@@ -17,6 +18,7 @@ export class ClientsService {
     private prisma: PrismaService,
     private auditService: AuditService,
     private smsService: SmsService,
+    private whatsappService: WhatsappService,
   ) {}
 
   private generateClientNumber(): string {
@@ -397,9 +399,11 @@ export class ClientsService {
     const clientName = dto.clientType === 'PHYSIQUE'
       ? `${dto.firstName} ${dto.lastName}`
       : dto.raisonSociale || '';
-    this.smsService.sendCredentials(
-      dto.phone, clientName, client.clientNumber, rawPassword,
-    ).catch((e) => console.error('[SMS]', e.message));
+    // Envoyer identifiants par SMS et WhatsApp en parallele
+    this.smsService.sendCredentials(dto.phone, clientName, client.clientNumber, rawPassword)
+      .catch((e) => console.error('[SMS]', e.message));
+    this.whatsappService.sendCredentials(dto.phone, clientName, client.clientNumber, rawPassword)
+      .catch((e) => console.error('[WA]', e.message));
 
     return client;
   }
@@ -411,6 +415,44 @@ export class ClientsService {
       password += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return password;
+  }
+
+  /**
+   * Activer / reinitialiser l'acces mobile d'un client
+   * Genere un nouveau mot de passe temporaire et l'envoie par SMS
+   */
+  async activateMobileAccess(clientId: string) {
+    const client = await this.prisma.client.findUnique({ where: { id: clientId } });
+    if (!client) throw new NotFoundException('Client non trouve');
+
+    const rawPassword = this.generatePassword();
+    const hashedPassword = await bcrypt.hash(rawPassword, 10);
+
+    await this.prisma.client.update({
+      where: { id: clientId },
+      data: { password: hashedPassword },
+    });
+
+    const clientName = client.clientType === 'PHYSIQUE'
+      ? `${client.firstName || ''} ${client.lastName || ''}`.trim()
+      : client.raisonSociale || '';
+
+    // Envoyer sur SMS et WhatsApp en parallele
+    const [smsSent, waSent] = await Promise.allSettled([
+      this.smsService.sendCredentials(client.phone, clientName, client.clientNumber, rawPassword),
+      this.whatsappService.sendCredentials(client.phone, clientName, client.clientNumber, rawPassword),
+    ]);
+
+    const channels: string[] = [];
+    if ((smsSent as PromiseFulfilledResult<boolean>).value) channels.push('SMS');
+    if ((waSent as PromiseFulfilledResult<boolean>).value) channels.push('WhatsApp');
+
+    return {
+      success: true,
+      message: `Acces mobile active. Message envoye via : ${channels.join(' + ') || 'aucun canal (verifiez la configuration)'}`,
+      clientNumber: client.clientNumber,
+      phone: client.phone,
+    };
   }
 
   async findAll(params: {

@@ -177,6 +177,13 @@ export class ClientsController {
     return this.clientsService.recalculateKycScore(id);
   }
 
+  @Post(':id/activate-mobile')
+  @Permissions('CLIENTS:UPDATE')
+  @ApiOperation({ summary: 'Activer ou reinitialiser l\'acces mobile d\'un client (envoie SMS avec identifiants)' })
+  activateMobileAccess(@Param('id') id: string) {
+    return this.clientsService.activateMobileAccess(id);
+  }
+
   // ==================== MANDATAIRES ====================
 
   @Post(':id/mandataires')

@@ -11,6 +11,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ContributionFrequency } from '@prisma/client';
 import { SettingsService } from './settings.service';
+import { SmsService } from '../sms/sms.service';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 
@@ -19,7 +20,10 @@ import { Permissions } from '../common/decorators/permissions.decorator';
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('settings')
 export class SettingsController {
-  constructor(private settingsService: SettingsService) {}
+  constructor(
+    private settingsService: SettingsService,
+    private smsService: SmsService,
+  ) {}
 
   // ==================== GET ALL SETTINGS ====================
 
@@ -137,6 +141,39 @@ export class SettingsController {
     },
   ) {
     return this.settingsService.updateCreditProduct(id, body);
+  }
+
+  // ==================== SMS CONFIG ====================
+
+  @Get('sms')
+  @Permissions('SETTINGS:READ')
+  @ApiOperation({ summary: 'Lire la configuration SMS NEXAH' })
+  getSmsConfig() {
+    return this.settingsService.getSmsConfig();
+  }
+
+  @Post('sms')
+  @Permissions('SETTINGS:UPDATE')
+  @ApiOperation({ summary: 'Sauvegarder la configuration SMS NEXAH' })
+  async saveSmsConfig(
+    @Body() body: { user: string; password?: string; senderId: string; enabled: boolean },
+  ) {
+    const result = await this.settingsService.saveSmsConfig(body);
+    // Recharger la config dans le service SMS en memoire
+    await this.smsService.loadConfigFromDb();
+    return result;
+  }
+
+  @Post('sms/test')
+  @Permissions('SETTINGS:UPDATE')
+  @ApiOperation({ summary: 'Envoyer un SMS de test pour valider la configuration NEXAH' })
+  async testSms(@Body() body: { phone: string }) {
+    await this.smsService.loadConfigFromDb();
+    const sent = await this.smsService.send(
+      body.phone,
+      'Test SMS GFS — Votre configuration NEXAH fonctionne correctement.',
+    );
+    return { success: sent, message: sent ? 'SMS de test envoye' : 'Echec envoi SMS' };
   }
 
   // ==================== SAVINGS PRODUCTS ====================

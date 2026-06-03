@@ -172,6 +172,34 @@ export class SettingsService {
     return this.prisma.savingsProduct.findMany({ orderBy: { name: 'asc' } });
   }
 
+  // ==================== SMS CONFIG ====================
+
+  async getSmsConfig() {
+    const settings = await this.prisma.setting.findMany({ where: { category: 'sms' } });
+    const map: Record<string, string> = {};
+    for (const s of settings) map[s.key] = s.value;
+    return {
+      user: map['nexah_sms_user'] || '',
+      // Ne jamais renvoyer le mot de passe en clair
+      passwordConfigured: !!map['nexah_sms_password'],
+      senderId: map['nexah_sms_sender_id'] || 'GFS',
+      enabled: map['nexah_sms_enabled'] !== 'false',
+    };
+  }
+
+  async saveSmsConfig(data: { user: string; password?: string; senderId: string; enabled: boolean }) {
+    const upserts = [
+      this.prisma.setting.upsert({ where: { key: 'nexah_sms_user' }, update: { value: data.user }, create: { key: 'nexah_sms_user', value: data.user, category: 'sms', description: 'Identifiant NEXAH SMS' } }),
+      this.prisma.setting.upsert({ where: { key: 'nexah_sms_sender_id' }, update: { value: data.senderId }, create: { key: 'nexah_sms_sender_id', value: data.senderId, category: 'sms', description: 'Expediteur SMS' } }),
+      this.prisma.setting.upsert({ where: { key: 'nexah_sms_enabled' }, update: { value: data.enabled ? 'true' : 'false' }, create: { key: 'nexah_sms_enabled', value: data.enabled ? 'true' : 'false', category: 'sms', description: 'SMS actif' } }),
+    ];
+    if (data.password) {
+      upserts.push(this.prisma.setting.upsert({ where: { key: 'nexah_sms_password' }, update: { value: data.password }, create: { key: 'nexah_sms_password', value: data.password, category: 'sms', description: 'Mot de passe NEXAH SMS' } }));
+    }
+    await Promise.all(upserts);
+    return { success: true, message: 'Configuration SMS sauvegardee' };
+  }
+
   async updateSavingsProduct(
     id: string,
     data: {
