@@ -255,6 +255,9 @@ model Client {
   address         String
   city            String
   region          String
+  arrondissement  String?
+  niu             String?
+  planLocalisation String?        @db.LongText
   language        Language        @default(FR)
   status          AccountStatus   @default(ACTIVE)
   kycVerified     Boolean         @default(false)
@@ -290,6 +293,11 @@ model Client {
   secteurActivite String?
   revenuMensuel   Decimal?        @db.Decimal(15, 0)
   phoneSecondaire String?
+  nomPere         String?
+  nomMere         String?
+  contactUrgenceNom   String?
+  contactUrgencePhone String?
+  contactUrgenceLien  String?
   companyId       String?
   company         Company?        @relation(fields: [companyId], references: [id])
 
