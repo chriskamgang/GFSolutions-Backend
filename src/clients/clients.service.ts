@@ -452,6 +452,7 @@ export class ClientsService {
       message: `Acces mobile active. Message envoye via : ${channels.join(' + ') || 'aucun canal (verifiez la configuration)'}`,
       clientNumber: client.clientNumber,
       phone: client.phone,
+      password: rawPassword,
     };
   }
 
