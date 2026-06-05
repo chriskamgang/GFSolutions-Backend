@@ -1,14 +1,29 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CreateAccountPlanDto, UpdateAccountPlanDto } from './dto/accounting.dto';
 
 @Injectable()
-export class AccountingService {
+export class AccountingService implements OnModuleInit {
+  private readonly logger = new Logger(AccountingService.name);
+
   constructor(
     private prisma: PrismaService,
     private auditService: AuditService,
   ) {}
+
+  async onModuleInit() {
+    try {
+      const count = await this.prisma.accountPlan.count();
+      if (count === 0) {
+        this.logger.log('Plan comptable vide — initialisation automatique...');
+        await this.seedAccountPlan();
+        this.logger.log('Plan comptable EMF initialise avec succes');
+      }
+    } catch (e) {
+      this.logger.warn('Impossible d\'initialiser le plan comptable : ' + e.message);
+    }
+  }
 
   // ==================== PLAN COMPTABLE EMF SYSCOHADA ====================
 
