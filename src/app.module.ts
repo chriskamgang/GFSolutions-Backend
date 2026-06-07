@@ -29,6 +29,7 @@ import { AppController } from './app.controller';
 import { PublicModule } from './public/public.module';
 import { BillPaymentsModule } from './bill-payments/bill-payments.module';
 import { CallboxModule } from './callbox/callbox.module';
+import { PawaPayModule } from './pawapay/pawapay.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { CallboxModule } from './callbox/callbox.module';
     PublicModule,
     BillPaymentsModule,
     CallboxModule,
+    PawaPayModule,
   ],
   controllers: [AppController],
 })
