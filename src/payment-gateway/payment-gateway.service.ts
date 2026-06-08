@@ -86,8 +86,8 @@ export class PaymentGatewayService {
   }
 
   async listMerchants(query: { status?: string; page?: number; limit?: number }) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
     const skip = (page - 1) * limit;
     const where: any = {};
     if (query.status) where.status = query.status;
@@ -403,8 +403,8 @@ export class PaymentGatewayService {
     page?: number;
     limit?: number;
   }) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 20;
     const where: any = { merchantId };
     if (query.status) where.status = query.status;
 
