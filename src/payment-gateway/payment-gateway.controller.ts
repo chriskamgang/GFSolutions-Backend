@@ -19,56 +19,56 @@ export class PaymentGatewayAdminController {
   constructor(private readonly svc: PaymentGatewayService) {}
 
   @Post('merchants')
-  @Permissions('SETTINGS:MANAGE')
+  @Permissions('SETTINGS:UPDATE')
   @ApiOperation({ summary: 'Enregistrer un nouveau marchand' })
   registerMerchant(@Body() body: any, @Request() req: any) {
     return this.svc.registerMerchant(body, req.user?.userId);
   }
 
   @Get('merchants')
-  @Permissions('SETTINGS:MANAGE')
+  @Permissions('SETTINGS:UPDATE')
   @ApiOperation({ summary: 'Lister les marchands' })
   listMerchants(@Query() query: any) {
     return this.svc.listMerchants(query);
   }
 
   @Get('merchants/:id')
-  @Permissions('SETTINGS:MANAGE')
+  @Permissions('SETTINGS:UPDATE')
   @ApiOperation({ summary: 'Detail d\'un marchand' })
   getMerchant(@Param('id') id: string) {
     return this.svc.getMerchantById(id);
   }
 
   @Patch('merchants/:id/activate')
-  @Permissions('SETTINGS:MANAGE')
+  @Permissions('SETTINGS:UPDATE')
   @ApiOperation({ summary: 'Activer un marchand' })
   activate(@Param('id') id: string) {
     return this.svc.updateMerchantStatus(id, 'ACTIVE');
   }
 
   @Patch('merchants/:id/suspend')
-  @Permissions('SETTINGS:MANAGE')
+  @Permissions('SETTINGS:UPDATE')
   @ApiOperation({ summary: 'Suspendre un marchand' })
   suspend(@Param('id') id: string) {
     return this.svc.updateMerchantStatus(id, 'SUSPENDED');
   }
 
   @Patch('merchants/:id')
-  @Permissions('SETTINGS:MANAGE')
+  @Permissions('SETTINGS:UPDATE')
   @ApiOperation({ summary: 'Modifier un marchand (commission, webhook, etc.)' })
   updateMerchant(@Param('id') id: string, @Body() body: any) {
     return this.svc.updateMerchant(id, body);
   }
 
   @Patch('merchants/:id/regenerate-keys')
-  @Permissions('SETTINGS:MANAGE')
+  @Permissions('SETTINGS:UPDATE')
   @ApiOperation({ summary: 'Regenerer les cles API d\'un marchand' })
   regenerateKeys(@Param('id') id: string) {
     return this.svc.regenerateApiKeys(id);
   }
 
   @Get('merchants/:id/payments')
-  @Permissions('SETTINGS:MANAGE')
+  @Permissions('SETTINGS:UPDATE')
   @ApiOperation({ summary: 'Lister les paiements d\'un marchand (admin)' })
   getMerchantPayments(@Param('id') id: string, @Query() query: any) {
     return this.svc.listMerchantPayments(id, query);
