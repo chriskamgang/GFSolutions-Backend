@@ -165,6 +165,7 @@ model Agency {
   vault           Vault?
   billPayments    BillPayment[]
   callboxes       Callbox[]
+  merchants       Merchant[]
 
   @@map("agencies")
 }
@@ -238,6 +239,7 @@ model User {
   vaultMovementsRequested VaultMovement[] @relation("VaultMovementRequester")
   vaultMovementsApproved  VaultMovement[] @relation("VaultMovementApprover")
   billPayments    BillPayment[]
+  merchantsCreated Merchant[]
 
   @@map("users")
 }
@@ -317,6 +319,7 @@ model Client {
   mandataires     Mandataire[]    @relation("MandataireMorale")
   tontineMemberships TontineMember[]
   savingsGoals    SavingsGoal[]
+  paymentRequests PaymentRequest[]
 
   @@map("clients")
 }
@@ -391,6 +394,7 @@ model Account {
   transactionsTo   Transaction[] @relation("ToAccount")
   checkbooks       Checkbook[]
   billPayments     BillPayment[]
+  merchantAccounts Merchant[]
 
   @@map("accounts")
 }
@@ -1153,6 +1157,82 @@ model CallboxFloatTopup {
 }
 
 // ==================== PAIEMENTS DE FACTURES ====================
+
+// ==================== PAYMENT GATEWAY ====================
+
+enum MerchantStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum PaymentRequestStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+  CANCELLED
+}
+
+model Merchant {
+  id            String         @id @default(uuid())
+  name          String         // Nom du marchand / entreprise
+  email         String         @unique
+  phone         String?
+  website       String?
+  description   String?
+  logoUrl       String?
+  apiKey        String         @unique
+  apiSecret     String         // hash bcrypt pour signature webhook
+  webhookUrl    String?        // URL de notification par défaut
+  returnUrl     String?        // Redirection après paiement
+  accountId     String         // Compte GFS qui reçoit les paiements
+  account       Account        @relation(fields: [accountId], references: [id])
+  agencyId      String
+  agency        Agency         @relation(fields: [agencyId], references: [id])
+  status        MerchantStatus @default(PENDING)
+  commissionPct Decimal        @default(0) @db.Decimal(5, 2) // % commission GFS
+  payments      PaymentRequest[]
+  createdById   String?
+  createdBy     User?          @relation(fields: [createdById], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([apiKey])
+  @@index([status])
+  @@map("merchants")
+}
+
+model PaymentRequest {
+  id            String               @id @default(uuid())
+  paymentRef    String               @unique // ID court lisible ex: PAY-ABC123
+  merchantId    String
+  merchant      Merchant             @relation(fields: [merchantId], references: [id])
+  amount        Decimal              @db.Decimal(15, 0)
+  currency      String               @default("XAF")
+  orderId       String               // ID commande côté marchand
+  description   String?
+  clientId      String?              // rempli après paiement
+  client        Client?              @relation(fields: [clientId], references: [id])
+  transactionId String?              // transaction GFS générée
+  status        PaymentRequestStatus @default(PENDING)
+  callbackUrl   String?              // webhook spécifique à ce paiement
+  returnUrl     String?              // redirect après ce paiement
+  expiresAt     DateTime
+  paidAt        DateTime?
+  webhookSent   Boolean              @default(false)
+  webhookStatus Int?                 // HTTP status renvoyé par le marchand
+  metadata      String?              @db.LongText // JSON libre du marchand
+  ipAddress     String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([merchantId])
+  @@index([status])
+  @@index([paymentRef])
+  @@index([orderId])
+  @@map("payment_requests")
+}
 
 model BillPayment {
   id              String    @id @default(uuid())

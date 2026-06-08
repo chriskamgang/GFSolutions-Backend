@@ -30,6 +30,7 @@ import { PublicModule } from './public/public.module';
 import { BillPaymentsModule } from './bill-payments/bill-payments.module';
 import { CallboxModule } from './callbox/callbox.module';
 import { PawaPayModule } from './pawapay/pawapay.module';
+import { PaymentGatewayModule } from './payment-gateway/payment-gateway.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { PawaPayModule } from './pawapay/pawapay.module';
     BillPaymentsModule,
     CallboxModule,
     PawaPayModule,
+    PaymentGatewayModule,
   ],
   controllers: [AppController],
 })
