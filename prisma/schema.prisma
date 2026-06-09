@@ -1191,7 +1191,8 @@ model Merchant {
   agencyId      String
   agency        Agency         @relation(fields: [agencyId], references: [id])
   status        MerchantStatus @default(PENDING)
-  commissionPct Decimal        @default(0) @db.Decimal(5, 2) // % commission GFS
+  commissionDepotPct   Decimal @default(0) @db.Decimal(5, 2) // % commission GFS sur les depots
+  commissionRetraitPct Decimal @default(0) @db.Decimal(5, 2) // % commission GFS sur les retraits
   payments      PaymentRequest[]
   createdById   String?
   createdBy     User?          @relation(fields: [createdById], references: [id])
@@ -1210,6 +1211,7 @@ model PaymentRequest {
   merchant      Merchant             @relation(fields: [merchantId], references: [id])
   amount        Decimal              @db.Decimal(15, 0)
   currency      String               @default("XAF")
+  type          String               @default("DEPOT") // DEPOT ou RETRAIT
   orderId       String               // ID commande côté marchand
   description   String?
   clientId      String?              // rempli après paiement

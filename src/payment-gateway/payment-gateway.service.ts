@@ -70,7 +70,8 @@ export class PaymentGatewayService {
         returnUrl: dto.returnUrl,
         accountId: dto.accountId,
         agencyId: dto.agencyId,
-        commissionPct: dto.commissionPct ?? 0,
+        commissionDepotPct: dto.commissionDepotPct ?? 0,
+        commissionRetraitPct: dto.commissionRetraitPct ?? 0,
         apiKey,
         apiSecret,
         createdById,
@@ -136,7 +137,8 @@ export class PaymentGatewayService {
     description?: string;
     webhookUrl?: string;
     returnUrl?: string;
-    commissionPct?: number;
+    commissionDepotPct?: number;
+    commissionRetraitPct?: number;
   }) {
     const merchant = await this.prisma.merchant.findUnique({ where: { id } });
     if (!merchant) throw new NotFoundException('Marchand introuvable');
@@ -171,6 +173,7 @@ export class PaymentGatewayService {
   async createPayment(merchantId: string, dto: {
     amount: number;
     orderId: string;
+    type?: 'DEPOT' | 'RETRAIT';
     description?: string;
     callbackUrl?: string;
     returnUrl?: string;
@@ -191,6 +194,7 @@ export class PaymentGatewayService {
         merchantId,
         amount: dto.amount,
         currency: 'XAF',
+        type: dto.type || 'DEPOT',
         orderId: dto.orderId,
         description: dto.description,
         callbackUrl: dto.callbackUrl || merchant.webhookUrl,
@@ -301,7 +305,10 @@ export class PaymentGatewayService {
     if (!account) throw new BadRequestException('Aucun compte courant actif trouve pour ce client');
 
     const amount = Number(payment.amount);
-    const commission = Math.round(amount * Number(payment.merchant.commissionPct) / 100);
+    const commissionRate = payment.type === 'RETRAIT'
+      ? Number(payment.merchant.commissionRetraitPct)
+      : Number(payment.merchant.commissionDepotPct);
+    const commission = Math.round(amount * commissionRate / 100);
     const totalDebit = amount + commission;
 
     if (Number(account.balance) < totalDebit) {
