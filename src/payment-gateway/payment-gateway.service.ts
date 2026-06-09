@@ -46,7 +46,8 @@ export class PaymentGatewayService {
     returnUrl?: string;
     accountId: string;
     agencyId: string;
-    commissionPct?: number;
+    commissionDepotPct?: number;
+    commissionRetraitPct?: number;
   }, createdById: string) {
     const existing = await this.prisma.merchant.findUnique({ where: { email: dto.email } });
     if (existing) throw new BadRequestException('Un marchand avec cet email existe deja');
