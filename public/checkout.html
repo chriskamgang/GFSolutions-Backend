@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Paiement GFSolutions</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      width: 100%;
+      max-width: 420px;
+      overflow: hidden;
+    }
+    .header {
+      background: linear-gradient(135deg, #1B2A4A 0%, #2d4373 100%);
+      color: #fff;
+      padding: 24px 24px 20px;
+      text-align: center;
+    }
+    .header .logo {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+    }
+    .header .logo span { color: #F5A623; }
+    .header .subtitle { font-size: 13px; opacity: 0.8; }
+    .merchant-info {
+      padding: 20px 24px;
+      border-bottom: 1px solid #f0f0f0;
+      text-align: center;
+    }
+    .merchant-name {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1B2A4A;
+      margin-bottom: 4px;
+    }
+    .order-id {
+      font-size: 12px;
+      color: #888;
+    }
+    .amount-box {
+      text-align: center;
+      padding: 20px 24px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .amount-label { font-size: 13px; color: #888; margin-bottom: 4px; }
+    .amount {
+      font-size: 36px;
+      font-weight: 700;
+      color: #1B2A4A;
+    }
+    .amount .currency { font-size: 18px; font-weight: 400; color: #666; }
+    .description {
+      font-size: 13px;
+      color: #666;
+      margin-top: 8px;
+    }
+    .form-section { padding: 24px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #444;
+      margin-bottom: 6px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 10px;
+      font-size: 16px;
+      transition: border-color 0.2s;
+      outline: none;
+    }
+    .form-group input:focus { border-color: #F5A623; }
+    .form-group input::placeholder { color: #bbb; }
+    .pin-input {
+      letter-spacing: 12px;
+      text-align: center;
+      font-size: 24px !important;
+      font-weight: 700;
+    }
+    .btn-pay {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: linear-gradient(135deg, #F5A623 0%, #e8951a 100%);
+      color: #fff;
+    }
+    .btn-pay:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(245,166,35,0.4); }
+    .btn-pay:active { transform: translateY(0); }
+    .btn-pay:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    .security-note {
+      text-align: center;
+      padding: 16px 24px 20px;
+      font-size: 11px;
+      color: #999;
+    }
+    .security-note svg {
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    .error-msg {
+      background: #fff2f0;
+      border: 1px solid #ffccc7;
+      color: #cf1322;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .success-screen {
+      display: none;
+      text-align: center;
+      padding: 40px 24px;
+    }
+    .success-screen .check-icon {
+      width: 80px;
+      height: 80px;
+      background: #52c41a;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+    }
+    .success-screen .check-icon svg { width: 40px; height: 40px; }
+    .success-screen h2 { color: #1B2A4A; font-size: 22px; margin-bottom: 8px; }
+    .success-screen p { color: #666; font-size: 14px; margin-bottom: 4px; }
+    .success-screen .ref { color: #F5A623; font-weight: 600; font-size: 16px; margin-top: 12px; }
+    .btn-return {
+      display: inline-block;
+      margin-top: 24px;
+      padding: 12px 32px;
+      background: #1B2A4A;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .expired-screen, .error-screen {
+      display: none;
+      text-align: center;
+      padding: 40px 24px;
+    }
+    .expired-screen .icon, .error-screen .icon {
+      width: 80px;
+      height: 80px;
+      background: #ff4d4f;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+    }
+    .expired-screen .icon svg, .error-screen .icon svg { width: 40px; height: 40px; }
+    .expired-screen h2, .error-screen h2 { color: #1B2A4A; font-size: 20px; margin-bottom: 8px; }
+    .expired-screen p, .error-screen p { color: #666; font-size: 14px; }
+    .loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 24px;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 4px solid #e0e0e0;
+      border-top-color: #F5A623;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading p { margin-top: 16px; color: #888; font-size: 14px; }
+    .timer { font-size: 12px; color: #F5A623; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="logo">GF<span>Solutions</span></div>
+      <div class="subtitle">Paiement securise</div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading-screen" class="loading">
+      <div class="spinner"></div>
+      <p>Chargement du paiement...</p>
+    </div>
+
+    <!-- Error screen (load failed) -->
+    <div id="error-screen" class="error-screen">
+      <div class="icon">
+        <svg fill="none" stroke="#fff" stroke-width="3" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+      </div>
+      <h2>Lien invalide</h2>
+      <p id="error-screen-msg">Ce lien de paiement est invalide ou a expire.</p>
+    </div>
+
+    <!-- Expired screen -->
+    <div id="expired-screen" class="expired-screen">
+      <div class="icon">
+        <svg fill="none" stroke="#fff" stroke-width="3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      </div>
+      <h2>Paiement expire</h2>
+      <p>Ce lien de paiement a expire. Veuillez demander un nouveau lien au marchand.</p>
+    </div>
+
+    <!-- Already paid screen -->
+    <div id="already-paid-screen" class="success-screen">
+      <div class="check-icon">
+        <svg fill="none" stroke="#fff" stroke-width="3" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
+      </div>
+      <h2>Deja paye</h2>
+      <p>Ce paiement a deja ete effectue.</p>
+    </div>
+
+    <!-- Payment form -->
+    <div id="payment-form" style="display:none;">
+      <div class="merchant-info">
+        <div class="merchant-name" id="merchant-name"></div>
+        <div class="order-id" id="order-id"></div>
+      </div>
+      <div class="amount-box">
+        <div class="amount-label">Montant a payer</div>
+        <div class="amount">
+          <span id="amount-value"></span>
+          <span class="currency">FCFA</span>
+        </div>
+        <div class="description" id="description"></div>
+        <div class="timer" id="timer"></div>
+      </div>
+      <div class="form-section">
+        <div id="error-msg" class="error-msg"></div>
+        <div class="form-group">
+          <label>Numero client GFSolutions</label>
+          <input type="text" id="client-number" placeholder="Ex: CLT-00001" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label>Code PIN (4 chiffres)</label>
+          <input type="password" id="pin" class="pin-input" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="****" />
+        </div>
+        <button class="btn-pay" id="btn-pay" onclick="confirmPayment()">
+          Payer maintenant
+        </button>
+      </div>
+      <div class="security-note">
+        <svg width="14" height="14" fill="none" stroke="#999" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        Paiement securise par GFSolutions. Vos donnees sont protegees.
+      </div>
+    </div>
+
+    <!-- Success screen -->
+    <div id="success-screen" class="success-screen">
+      <div class="check-icon">
+        <svg fill="none" stroke="#fff" stroke-width="3" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>
+      </div>
+      <h2>Paiement reussi !</h2>
+      <p id="success-amount"></p>
+      <p id="success-merchant"></p>
+      <div class="ref" id="success-ref"></div>
+      <a id="btn-return" class="btn-return" style="display:none;">Retour au site</a>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin + '/api/v1';
+    const pathParts = window.location.pathname.split('/');
+    const paymentRef = pathParts[pathParts.length - 1];
+
+    let paymentData = null;
+    let returnUrl = null;
+    let countdownInterval = null;
+
+    function show(id) {
+      ['loading-screen','error-screen','expired-screen','already-paid-screen','payment-form','success-screen']
+        .forEach(s => document.getElementById(s).style.display = 'none');
+      document.getElementById(id).style.display = '';
+    }
+
+    function formatAmount(n) {
+      return Number(n).toLocaleString('fr-FR');
+    }
+
+    function startCountdown(expiresAt) {
+      const target = new Date(expiresAt).getTime();
+      const timerEl = document.getElementById('timer');
+      countdownInterval = setInterval(() => {
+        const diff = target - Date.now();
+        if (diff <= 0) {
+          clearInterval(countdownInterval);
+          show('expired-screen');
+          return;
+        }
+        const m = Math.floor(diff / 60000);
+        const s = Math.floor((diff % 60000) / 1000);
+        timerEl.textContent = 'Expire dans ' + m + ':' + (s < 10 ? '0' : '') + s;
+      }, 1000);
+    }
+
+    async function loadPayment() {
+      if (!paymentRef || paymentRef === 'checkout' || paymentRef === 'checkout.html') {
+        show('error-screen');
+        return;
+      }
+
+      try {
+        const res = await fetch(API_BASE + '/gateway/pay/' + paymentRef);
+        const data = await res.json();
+
+        if (!res.ok) {
+          const msg = data.message || 'Erreur inconnue';
+          if (msg.includes('expire')) {
+            show('expired-screen');
+          } else {
+            document.getElementById('error-screen-msg').textContent = msg;
+            show('error-screen');
+          }
+          return;
+        }
+
+        paymentData = data;
+        returnUrl = data.returnUrl;
+
+        if (data.status === 'COMPLETED') {
+          show('already-paid-screen');
+          return;
+        }
+
+        if (data.status === 'EXPIRED' || data.status === 'CANCELLED' || data.status === 'FAILED') {
+          show('expired-screen');
+          return;
+        }
+
+        // Show form
+        document.getElementById('merchant-name').textContent = data.merchant?.name || 'Marchand';
+        document.getElementById('order-id').textContent = data.orderId ? 'Commande #' + data.orderId : '';
+        document.getElementById('amount-value').textContent = formatAmount(data.amount);
+        document.getElementById('description').textContent = data.description || '';
+        if (data.expiresAt) startCountdown(data.expiresAt);
+
+        show('payment-form');
+      } catch (err) {
+        document.getElementById('error-screen-msg').textContent = 'Impossible de charger le paiement. Verifiez votre connexion.';
+        show('error-screen');
+      }
+    }
+
+    async function confirmPayment() {
+      const clientNumber = document.getElementById('client-number').value.trim();
+      const pin = document.getElementById('pin').value.trim();
+      const errorEl = document.getElementById('error-msg');
+      const btn = document.getElementById('btn-pay');
+
+      errorEl.style.display = 'none';
+
+      if (!clientNumber) {
+        errorEl.textContent = 'Veuillez entrer votre numero client.';
+        errorEl.style.display = 'block';
+        return;
+      }
+      if (!pin || pin.length !== 4) {
+        errorEl.textContent = 'Veuillez entrer votre PIN a 4 chiffres.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Traitement en cours...';
+
+      try {
+        const res = await fetch(API_BASE + '/gateway/pay/' + paymentRef + '/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientNumber, pin }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          errorEl.textContent = data.message || 'Erreur lors du paiement.';
+          errorEl.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = 'Payer maintenant';
+          return;
+        }
+
+        if (countdownInterval) clearInterval(countdownInterval);
+
+        // Success
+        document.getElementById('success-amount').textContent = formatAmount(paymentData.amount) + ' FCFA';
+        document.getElementById('success-merchant').textContent = 'Paye a ' + (paymentData.merchant?.name || 'Marchand');
+        document.getElementById('success-ref').textContent = 'Ref: ' + paymentRef;
+
+        if (returnUrl) {
+          const btnReturn = document.getElementById('btn-return');
+          btnReturn.href = returnUrl;
+          btnReturn.style.display = 'inline-block';
+        }
+
+        show('success-screen');
+      } catch (err) {
+        errorEl.textContent = 'Erreur reseau. Veuillez reessayer.';
+        errorEl.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Payer maintenant';
+      }
+    }
+
+    // Allow Enter key to submit
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && document.getElementById('payment-form').style.display !== 'none') {
+        confirmPayment();
+      }
+    });
+
+    loadPayment();
+  </script>
+</body>
+</html>

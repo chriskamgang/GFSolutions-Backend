@@ -16,6 +16,16 @@ async function bootstrap() {
   // Prefix global
   app.setGlobalPrefix('api/v1');
 
+  // Checkout page (hors prefix API) — sert le fichier HTML statique
+  const express = require('express');
+  const path = require('path');
+  // __dirname = dist/src en prod, on remonte 2 niveaux pour atteindre /public
+  const publicDir = path.join(__dirname, '..', '..', 'public');
+  const checkoutPath = path.join(publicDir, 'checkout.html');
+  app.getHttpAdapter().get('/checkout/:ref', (req: any, res: any) => {
+    res.sendFile(checkoutPath);
+  });
+
   // CORS
   app.enableCors({
     origin: (origin, callback) => {
