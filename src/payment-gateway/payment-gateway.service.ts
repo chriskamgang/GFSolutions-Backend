@@ -1,9 +1,12 @@
 import {
   Injectable, Logger, BadRequestException,
   NotFoundException, UnauthorizedException, ForbiddenException,
+  ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { SmsService } from '../sms/sms.service';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
@@ -27,6 +30,8 @@ export class PaymentGatewayService {
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
+    private whatsappService: WhatsappService,
+    private smsService: SmsService,
   ) {
     this.paymentBaseUrl = this.configService.get<string>(
       'PAYMENT_GATEWAY_URL',
@@ -498,6 +503,283 @@ export class PaymentGatewayService {
     } catch (err) {
       this.logger.warn(`[GatewayPay] Webhook echec: ${paymentRef} → ${err.message}`);
     }
+  }
+
+  // ==================== ONBOARDING PARTENAIRE (creation auto client) ====================
+
+  private generateClientNumber(): string {
+    const timestamp = Date.now().toString().slice(-8);
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return `CLI-${timestamp}${random}`;
+  }
+
+  private generatePassword(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+    let password = '';
+    for (let i = 0; i < 8; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return password;
+  }
+
+  private async generateAccountNumber(agencyId: string, productCode: string): Promise<string> {
+    const agency = await this.prisma.agency.findUnique({ where: { id: agencyId } });
+    const agencyCode = agency?.code || '001';
+    const count = await this.prisma.account.count({
+      where: { agencyId, product: { code: productCode } },
+    });
+    const chrono = (count + 1).toString().padStart(6, '0');
+    return `${agencyCode}-${productCode}-${chrono}`;
+  }
+
+  async partnerOnboardClient(merchantId: string, dto: {
+    firstName: string;
+    lastName: string;
+    phone: string;
+    email?: string;
+    gender?: 'M' | 'F';
+    dateOfBirth?: string;
+    address?: string;
+    city?: string;
+    region?: string;
+    partnerUserId?: string;
+    metadata?: string;
+  }) {
+    const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
+    if (!merchant || merchant.status !== 'ACTIVE') throw new ForbiddenException('Marchand inactif');
+
+    // Nettoyer le telephone
+    let phone = dto.phone.replace(/[\s\-\.]/g, '');
+    if (!phone.startsWith('+237')) {
+      phone = phone.startsWith('237') ? `+${phone}` : `+237${phone}`;
+    }
+
+    // Verifier doublon par telephone
+    const existing = await this.prisma.client.findFirst({ where: { phone } });
+    if (existing) {
+      this.logger.log(`[PartnerOnboard] Client existant: ${existing.clientNumber} — tel: ${phone}`);
+      return {
+        success: true,
+        alreadyExists: true,
+        clientNumber: existing.clientNumber,
+        message: 'Ce client possede deja un compte GFSolutions.',
+      };
+    }
+
+    // Trouver le produit compte courant
+    const product = await this.prisma.accountProduct.findFirst({
+      where: { type: 'CURRENT', isActive: true },
+    });
+    if (!product) throw new BadRequestException('Aucun produit de compte courant actif configure');
+
+    const ACCOUNT_CREATION_FEE = 1000; // frais de creation debites du marchand
+    const minDeposit = Number(product.minOpeningDeposit) || 0;
+    const openingFees = Number(product.openingFees) || 0;
+    const totalNeeded = ACCOUNT_CREATION_FEE + minDeposit + openingFees;
+
+    // Verifier que le marchand a assez de solde
+    const merchantAccount = await this.prisma.account.findUnique({ where: { id: merchant.accountId } });
+    if (!merchantAccount || Number(merchantAccount.balance) < totalNeeded) {
+      throw new BadRequestException(
+        `Solde marchand insuffisant. Requis: ${totalNeeded.toLocaleString('fr-FR')} FCFA (frais creation: ${ACCOUNT_CREATION_FEE}, depot min: ${minDeposit}, frais ouverture: ${openingFees})`
+      );
+    }
+
+    // Generer identifiants
+    const clientNumber = this.generateClientNumber();
+    const rawPassword = this.generatePassword();
+    const hashedPassword = await bcrypt.hash(rawPassword, 10);
+    const rawPin = Math.floor(1000 + Math.random() * 9000).toString();
+    const hashedPin = await bcrypt.hash(rawPin, 10);
+
+    // Transaction atomique
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Creer le client
+      const client = await tx.client.create({
+        data: {
+          clientNumber,
+          clientType: 'PHYSIQUE',
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone,
+          email: dto.email,
+          gender: dto.gender as any,
+          dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
+          address: dto.address || 'A completer',
+          city: dto.city || 'Douala',
+          region: dto.region || 'Littoral',
+          agencyId: merchant.agencyId,
+          language: 'FR',
+          qrCode: uuidv4(),
+          password: hashedPassword,
+          pin: hashedPin,
+          partnerSource: merchant.name.toUpperCase().replace(/\s+/g, '_'),
+          partnerUserId: dto.partnerUserId,
+          kycScore: 10,
+          kycScoreLabel: 'Insuffisant',
+        },
+      });
+
+      // 2. Creer le compte courant
+      const accountNumber = await this.generateAccountNumber(merchant.agencyId, product.code);
+      const account = await tx.account.create({
+        data: {
+          accountNumber,
+          clientId: client.id,
+          agencyId: merchant.agencyId,
+          productId: product.id,
+          type: 'CURRENT',
+          balance: minDeposit,
+        },
+      });
+
+      // 3. Debiter le marchand (frais creation + depot minimum + frais ouverture)
+      await tx.account.update({
+        where: { id: merchant.accountId },
+        data: { balance: { decrement: totalNeeded } },
+      });
+
+      // 4. Creer la transaction
+      const reference = `ONBOARD-${Date.now()}-${Math.floor(Math.random() * 9999)}`;
+      await tx.transaction.create({
+        data: {
+          reference,
+          type: 'TRANSFER',
+          amount: totalNeeded,
+          fees: openingFees + ACCOUNT_CREATION_FEE,
+          tax: 0,
+          fromAccountId: merchant.accountId,
+          toAccountId: account.id,
+          agencyId: merchant.agencyId,
+          status: 'COMPLETED',
+          description: `Ouverture compte partenaire ${merchant.name} — Client: ${dto.firstName} ${dto.lastName}`,
+        },
+      });
+
+      return { client, account, accountNumber };
+    });
+
+    const clientName = `${dto.firstName} ${dto.lastName}`;
+
+    // Envoyer identifiants + message de bienvenue via WhatsApp
+    const waText =
+      `*Bienvenue chez GFSolutions !* 🎉\n\n` +
+      `Cher(e) *${clientName}*,\n\n` +
+      `Votre compte bancaire GFSolutions a ete cree avec succes via *${merchant.name}*.\n\n` +
+      `📱 *Vos identifiants :*\n` +
+      `• Numero client : *${clientNumber}*\n` +
+      `• Mot de passe : *${rawPassword}*\n` +
+      `• Code PIN : *${rawPin}*\n` +
+      `• N° de compte : *${result.accountNumber}*\n\n` +
+      `📥 *Telechargez l'application GFS* pour gerer votre compte :\n` +
+      `Android : https://play.google.com/store/apps/details?id=com.gfsolutions.app\n\n` +
+      `⚠️ *IMPORTANT* : Veuillez passer au bureau GFSolutions le plus proche avec les documents suivants :\n` +
+      `- Piece d'identite (CNI, Passeport ou Carte de sejour)\n` +
+      `- Une photo d'identite recente\n` +
+      `- Justificatif de domicile\n\n` +
+      `_Changez votre mot de passe et PIN apres votre premiere connexion._\n\n` +
+      `*Global Financial Solution* — Votre partenaire financier 🏦`;
+
+    this.whatsappService.sendMessage(phone, waText)
+      .catch((e) => this.logger.warn(`[PartnerOnboard] WhatsApp echec: ${e.message}`));
+
+    // Aussi par SMS (version courte)
+    const smsText = `GFSolutions: Votre compte ${clientNumber} a ete cree. Mot de passe: ${rawPassword}, PIN: ${rawPin}. Passez au bureau avec votre CNI. Telechargez l'app GFS.`;
+    this.smsService.send(phone, smsText)
+      .catch((e) => this.logger.warn(`[PartnerOnboard] SMS echec: ${e.message}`));
+
+    // Webhook vers le marchand
+    if (merchant.webhookUrl) {
+      const payload = {
+        event: 'client.onboarded',
+        clientNumber,
+        accountNumber: result.accountNumber,
+        phone,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        partnerUserId: dto.partnerUserId,
+        amountDebited: ACCOUNT_CREATION_FEE + minDeposit + openingFees,
+        timestamp: new Date().toISOString(),
+      };
+      const hmac = crypto.createHmac('sha256', merchant.apiKey).update(JSON.stringify(payload)).digest('hex');
+      fetch(merchant.webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-GFS-Signature': `sha256=${hmac}`,
+          'X-GFS-Event': 'client.onboarded',
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10000),
+      }).catch((e) => this.logger.warn(`[PartnerOnboard] Webhook echec: ${e.message}`));
+    }
+
+    this.logger.log(`[PartnerOnboard] Client cree: ${clientNumber} — ${clientName} — via ${merchant.name}`);
+
+    return {
+      success: true,
+      alreadyExists: false,
+      clientNumber,
+      accountNumber: result.accountNumber,
+      phone,
+      amountDebited: ACCOUNT_CREATION_FEE + minDeposit + openingFees,
+      message: `Compte GFSolutions cree pour ${clientName}. Identifiants envoyes par WhatsApp et SMS.`,
+    };
+  }
+
+  // ==================== RAPPELS KYC PARTENAIRES (cron) ====================
+
+  async sendKycReminders() {
+    // Trouver les clients crees par partenaires dont le KYC n'est pas verifie
+    // et dont le dernier rappel date de plus de 2 jours
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+    const clients = await this.prisma.client.findMany({
+      where: {
+        partnerSource: { not: null },
+        kycVerified: false,
+        status: 'ACTIVE',
+        OR: [
+          { kycReminderSentAt: null },
+          { kycReminderSentAt: { lt: twoDaysAgo } },
+        ],
+      },
+      take: 50,
+    });
+
+    let sent = 0;
+    for (const client of clients) {
+      const name = `${client.firstName || ''} ${client.lastName || ''}`.trim();
+      const reminderNum = (client.kycReminderCount || 0) + 1;
+
+      const text =
+        `🔔 *Rappel GFSolutions*\n\n` +
+        `Cher(e) *${name}*,\n\n` +
+        `Votre compte *${client.clientNumber}* a ete cree mais vos documents ne sont pas encore a jour.\n\n` +
+        `📋 *Documents requis :*\n` +
+        `- Piece d'identite (CNI/Passeport)\n` +
+        `- Photo d'identite recente\n` +
+        `- Justificatif de domicile\n\n` +
+        `Passez au bureau GFSolutions le plus proche pour completer votre dossier.\n\n` +
+        `_Rappel n°${reminderNum} — Global Financial Solution_ 🏦`;
+
+      try {
+        await this.whatsappService.sendMessage(client.phone, text);
+        await this.prisma.client.update({
+          where: { id: client.id },
+          data: {
+            kycReminderSentAt: new Date(),
+            kycReminderCount: reminderNum,
+          },
+        });
+        sent++;
+      } catch (e) {
+        this.logger.warn(`[KycReminder] Echec pour ${client.clientNumber}: ${e.message}`);
+      }
+    }
+
+    this.logger.log(`[KycReminder] ${sent}/${clients.length} rappels envoyes`);
+    return { sent, total: clients.length };
   }
 
   // ==================== STATS ADMIN ====================

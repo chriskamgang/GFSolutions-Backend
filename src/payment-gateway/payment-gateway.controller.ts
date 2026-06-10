@@ -107,6 +107,12 @@ export class PaymentGatewayMerchantController {
   getStatus(@Param('paymentRef') paymentRef: string, @Request() req: any) {
     return this.svc.getPaymentStatus(paymentRef, req.merchant.id);
   }
+
+  @Post('onboard-client')
+  @ApiOperation({ summary: 'Creer automatiquement un client GFSolutions (partenaire)' })
+  onboardClient(@Body() body: any, @Request() req: any) {
+    return this.svc.partnerOnboardClient(req.merchant.id, body);
+  }
 }
 
 // ==================== PUBLIC (page de paiement) ====================

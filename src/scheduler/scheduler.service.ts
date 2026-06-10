@@ -9,6 +9,7 @@ import { AccountingService } from '../accounting/accounting.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SmsService } from '../sms/sms.service';
 import { CreditsService } from '../credits/credits.service';
+import { PaymentGatewayService } from '../payment-gateway/payment-gateway.service';
 
 @Injectable()
 export class SchedulerService {
@@ -21,6 +22,7 @@ export class SchedulerService {
     private smsService: SmsService,
     private creditsService: CreditsService,
     private configService: ConfigService,
+    private paymentGatewayService: PaymentGatewayService,
   ) {}
 
   // ==================== a) CALCUL INTERETS MENSUELS (par quinzaine) ====================
@@ -584,7 +586,21 @@ export class SchedulerService {
     }
   }
 
-  // ==================== h) SAUVEGARDE AUTOMATIQUE QUOTIDIENNE ====================
+  // ==================== h) RAPPELS KYC PARTENAIRES ====================
+  // Tous les 2 jours a 10:00
+
+  @Cron('0 10 */2 * *')
+  async sendPartnerKycReminders() {
+    this.logger.log('CRON: Envoi rappels KYC clients partenaires...');
+    try {
+      const result = await this.paymentGatewayService.sendKycReminders();
+      this.logger.log(`Rappels KYC: ${result.sent}/${result.total} envoyes`);
+    } catch (error) {
+      this.logger.error('Erreur rappels KYC:', error.message);
+    }
+  }
+
+  // ==================== i) SAUVEGARDE AUTOMATIQUE QUOTIDIENNE ====================
   // Tous les jours a 3h du matin
 
   @Cron('0 3 * * *')

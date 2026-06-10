@@ -5,9 +5,10 @@ import { AccountingModule } from '../accounting/accounting.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SmsModule } from '../sms/sms.module';
 import { CreditsModule } from '../credits/credits.module';
+import { PaymentGatewayModule } from '../payment-gateway/payment-gateway.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AccountingModule, NotificationsModule, SmsModule, CreditsModule],
+  imports: [ScheduleModule.forRoot(), AccountingModule, NotificationsModule, SmsModule, CreditsModule, PaymentGatewayModule],
   providers: [SchedulerService],
 })
 export class SchedulerModule {}

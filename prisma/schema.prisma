@@ -311,6 +311,12 @@ model Client {
   dateConstitution    DateTime?
   signatureRule       SignatureRule    @default(SINGLE)
 
+  // === Partenaire (creation auto via API marchand) ===
+  partnerSource       String?         // ex: "ESTUAIRE_EMPLOI"
+  partnerUserId       String?         // ID utilisateur chez le partenaire
+  kycReminderSentAt   DateTime?       // derniere date d'envoi rappel documents
+  kycReminderCount    Int             @default(0) // nombre de rappels envoyes
+
   // === Relations ===
   accounts        Account[]
   credits         Credit[]
