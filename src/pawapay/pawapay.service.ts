@@ -465,6 +465,75 @@ export class PawaPayService {
     return res.json();
   }
 
+  // ==================== SOLDE MARCHAND ====================
+
+  async getMerchantBalance() {
+    if (!this.apiKey) return { configured: false, message: 'KPay non configure' };
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/balance`, { headers: this.headers });
+      if (res.ok) {
+        const data = await res.json();
+        return { configured: true, ...data };
+      }
+      // Si pas d'endpoint balance, tenter /api/v1/account/balance
+      const res2 = await fetch(`${this.baseUrl}/api/v1/account/balance`, { headers: this.headers });
+      if (res2.ok) {
+        const data2 = await res2.json();
+        return { configured: true, ...data2 };
+      }
+      return { configured: true, balance: null, message: 'Endpoint solde non disponible. Consultez kpay.site.' };
+    } catch (e) {
+      this.logger.warn(`[KPay] Erreur balance: ${e.message}`);
+      return { configured: true, balance: null, error: e.message };
+    }
+  }
+
+  async topUpMerchantBalance(params: { amount: number; phone: string; provider: string }) {
+    if (!this.apiKey) throw new BadRequestException('KPay non configure');
+    if (params.amount < 100) throw new BadRequestException('Montant minimum : 100 FCFA');
+
+    const provider = this.resolveProvider(params.provider);
+    const externalId = `TOPUP-${uuidv4()}`;
+
+    const body = {
+      amount: Math.round(params.amount),
+      provider,
+      phoneNumber: this.formatPhone(params.phone),
+      externalId,
+      description: 'Recharge GFSolutions',
+    };
+
+    this.logger.log(`[KPay] Recharge marchand initiee: ${externalId} — ${params.amount} XAF — ${provider}`);
+
+    const res = await fetch(`${this.baseUrl}/api/v1/payments/init`, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json();
+    this.logger.log(`[KPay] Reponse recharge: ${JSON.stringify(data)}`);
+
+    if (!res.ok) {
+      throw new BadRequestException(`Recharge rejetee: ${data.message || 'Erreur KPay'}`);
+    }
+
+    return {
+      success: true,
+      paymentId: data.id,
+      externalId,
+      status: data.status,
+      amount: params.amount,
+      message: 'Demande de recharge envoyee. Confirmez sur votre telephone.',
+    };
+  }
+
+  async getTopUpStatus(paymentId: string) {
+    return this.getDepositStatus(paymentId);
+  }
+
+  // ==================== DISPONIBILITE ====================
+
   async getAvailability() {
     if (!this.apiKey) return { configured: false, message: 'KPay non configure' };
     const allProviders = [

@@ -110,6 +110,37 @@ export class PawaPayController {
     return this.kpayService.handleWebhook(payload);
   }
 
+  // ==================== SOLDE & RECHARGE MARCHAND ====================
+
+  @Get('balance')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Permissions('SETTINGS:READ')
+  @ApiOperation({ summary: 'Consulter le solde marchand KPay' })
+  getMerchantBalance() {
+    return this.kpayService.getMerchantBalance();
+  }
+
+  @Post('topup')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Permissions('SETTINGS:UPDATE')
+  @ApiOperation({ summary: 'Recharger le solde marchand KPay via Mobile Money' })
+  topUpBalance(
+    @Body() body: { amount: number; phone: string; provider: string },
+  ) {
+    return this.kpayService.topUpMerchantBalance(body);
+  }
+
+  @Get('topup/status/:id')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Permissions('SETTINGS:READ')
+  @ApiOperation({ summary: 'Verifier le statut d\'une recharge marchand' })
+  getTopUpStatus(@Param('id') id: string) {
+    return this.kpayService.getTopUpStatus(id);
+  }
+
   // ==================== STATUT & DISPONIBILITE ====================
 
   @Get('status/deposit/:id')
