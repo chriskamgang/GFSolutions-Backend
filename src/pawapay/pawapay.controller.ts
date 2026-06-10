@@ -4,14 +4,14 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { PawaPayService, PawaPayProvider } from './pawapay.service';
+import { PawaPayService } from './pawapay.service';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 
-@ApiTags('PawaPay Mobile Money')
+@ApiTags('KPay Mobile Money')
 @Controller('pawapay')
 export class PawaPayController {
-  constructor(private readonly pawaPayService: PawaPayService) {}
+  constructor(private readonly kpayService: PawaPayService) {}
 
   // ==================== DEPOT ====================
 
@@ -25,13 +25,13 @@ export class PawaPayController {
       accountId: string;
       amount: number;
       phone: string;
-      provider: PawaPayProvider;
+      provider: string;
       agencyId: string;
       description?: string;
     },
     @Request() req: any,
   ) {
-    return this.pawaPayService.initiateDeposit({ ...body, initiatedBy: req.user?.userId });
+    return this.kpayService.initiateDeposit({ ...body, initiatedBy: req.user?.userId });
   }
 
   // Depot depuis l'app mobile client (JWT client)
@@ -43,13 +43,13 @@ export class PawaPayController {
       accountId: string;
       amount: number;
       phone: string;
-      provider: PawaPayProvider;
+      provider: string;
       agencyId: string;
       description?: string;
     },
     @Request() req: any,
   ) {
-    return this.pawaPayService.initiateDeposit({ ...body, initiatedBy: req.user?.sub });
+    return this.kpayService.initiateDeposit({ ...body, initiatedBy: req.user?.sub });
   }
 
   // ==================== RETRAIT ====================
@@ -64,12 +64,12 @@ export class PawaPayController {
       accountId: string;
       amount: number;
       phone: string;
-      provider: PawaPayProvider;
+      provider: string;
       agencyId: string;
       description?: string;
     },
   ) {
-    return this.pawaPayService.initiatePayout(body);
+    return this.kpayService.initiatePayout(body);
   }
 
   // Retrait depuis l'app mobile client
@@ -81,51 +81,58 @@ export class PawaPayController {
       accountId: string;
       amount: number;
       phone: string;
-      provider: PawaPayProvider;
+      provider: string;
       agencyId: string;
       description?: string;
     },
   ) {
-    return this.pawaPayService.initiatePayout(body);
+    return this.kpayService.initiatePayout(body);
   }
 
-  // ==================== CALLBACKS (pawaPay → notre serveur) ====================
+  // ==================== WEBHOOK KPAY ====================
 
+  @Post('webhook')
+  @ApiOperation({ summary: 'Webhook KPay (paiement et retrait)' })
+  handleWebhook(@Body() payload: any) {
+    return this.kpayService.handleWebhook(payload);
+  }
+
+  // Ancien format callbacks (redirige vers webhook unifie)
   @Post('callback/deposit')
-  @ApiOperation({ summary: 'Callback pawaPay pour les depots (webhook)' })
+  @ApiOperation({ summary: 'Callback depot (compatibilite)' })
   depositCallback(@Body() payload: any) {
-    return this.pawaPayService.handleDepositCallback(payload);
+    return this.kpayService.handleWebhook(payload);
   }
 
   @Post('callback/payout')
-  @ApiOperation({ summary: 'Callback pawaPay pour les retraits (webhook)' })
+  @ApiOperation({ summary: 'Callback retrait (compatibilite)' })
   payoutCallback(@Body() payload: any) {
-    return this.pawaPayService.handlePayoutCallback(payload);
+    return this.kpayService.handleWebhook(payload);
   }
 
   // ==================== STATUT & DISPONIBILITE ====================
 
-  @Get('status/deposit/:depositId')
+  @Get('status/deposit/:id')
   @ApiBearerAuth()
   @UseGuards(AuthGuard('jwt'))
-  @ApiOperation({ summary: 'Verifier le statut d\'un depot pawaPay' })
-  getDepositStatus(@Param('depositId') depositId: string) {
-    return this.pawaPayService.getDepositStatus(depositId);
+  @ApiOperation({ summary: 'Verifier le statut d\'un depot KPay' })
+  getDepositStatus(@Param('id') id: string) {
+    return this.kpayService.getDepositStatus(id);
   }
 
-  @Get('status/payout/:payoutId')
+  @Get('status/payout/:id')
   @ApiBearerAuth()
   @UseGuards(AuthGuard('jwt'))
-  @ApiOperation({ summary: 'Verifier le statut d\'un payout pawaPay' })
-  getPayoutStatus(@Param('payoutId') payoutId: string) {
-    return this.pawaPayService.getPayoutStatus(payoutId);
+  @ApiOperation({ summary: 'Verifier le statut d\'un retrait KPay' })
+  getPayoutStatus(@Param('id') id: string) {
+    return this.kpayService.getPayoutStatus(id);
   }
 
   @Get('availability')
   @ApiBearerAuth()
   @UseGuards(AuthGuard('jwt'))
-  @ApiOperation({ summary: 'Verifier la disponibilite des operateurs pawaPay' })
+  @ApiOperation({ summary: 'Verifier la disponibilite des operateurs KPay' })
   getAvailability() {
-    return this.pawaPayService.getAvailability();
+    return this.kpayService.getAvailability();
   }
 }

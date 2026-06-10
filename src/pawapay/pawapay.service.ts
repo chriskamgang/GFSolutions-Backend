@@ -2,22 +2,34 @@ import { Injectable, Logger, BadRequestException, NotFoundException } from '@nes
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { SmsService } from '../sms/sms.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { AccountingService } from '../accounting/accounting.service';
 import { v4 as uuidv4 } from 'uuid';
 
-export type PawaPayProvider = 'MTN_MOMO' | 'ORANGE_MONEY';
+export type KPayProvider = 'MTN_MOMO_CMR' | 'ORANGE_CMR';
 
-// Mapping providers GFS -> codes pawaPay Cameroun
-const PROVIDER_MAP: Record<PawaPayProvider, string> = {
+// Mapping interne GFS -> codes KPay Cameroun
+const PROVIDER_DISPLAY: Record<string, string> = {
+  MTN_MOMO_CMR: 'MTN MoMo',
+  ORANGE_CMR: 'Orange Money',
+  MTN_MOMO: 'MTN MoMo',
+  ORANGE_MONEY: 'Orange Money',
+};
+
+// Mapping ancien format -> KPay
+const PROVIDER_MAP: Record<string, string> = {
   MTN_MOMO: 'MTN_MOMO_CMR',
   ORANGE_MONEY: 'ORANGE_CMR',
+  MTN_MOMO_CMR: 'MTN_MOMO_CMR',
+  ORANGE_CMR: 'ORANGE_CMR',
 };
 
 @Injectable()
 export class PawaPayService {
-  private readonly logger = new Logger(PawaPayService.name);
-  private readonly baseUrl: string;
-  private readonly apiToken: string;
+  private readonly logger = new Logger('KPayService');
+  private readonly baseUrl = 'https://admin.kpay.site';
+  private readonly apiKey: string;
+  private readonly secretKey: string;
   private readonly callbackUrl: string;
   private readonly currency = 'XAF';
 
@@ -25,41 +37,47 @@ export class PawaPayService {
     private prisma: PrismaService,
     private configService: ConfigService,
     private smsService: SmsService,
+    private whatsappService: WhatsappService,
     private accountingService: AccountingService,
   ) {
-    this.baseUrl = this.configService.get<string>('PAWAPAY_BASE_URL', 'https://api.sandbox.pawapay.io');
-    this.apiToken = this.configService.get<string>('PAWAPAY_API_TOKEN', '');
-    this.callbackUrl = this.configService.get<string>('PAWAPAY_CALLBACK_URL', '');
+    this.apiKey = this.configService.get<string>('KPAY_API_KEY', '');
+    this.secretKey = this.configService.get<string>('KPAY_SECRET_KEY', '');
+    this.callbackUrl = this.configService.get<string>('KPAY_CALLBACK_URL', '');
   }
 
   private get headers() {
     return {
-      'Authorization': `Bearer ${this.apiToken}`,
+      'X-API-Key': this.apiKey,
+      'X-Secret-Key': this.secretKey,
       'Content-Type': 'application/json',
     };
   }
 
   private formatPhone(phone: string): string {
-    // pawaPay attend le format international sans + ex: 237699123456
-    return phone.replace(/^\+/, '').replace(/\s/g, '');
+    // KPay attend le format international sans + : 237699123456
+    return phone.replace(/^\+/, '').replace(/[\s\-\.]/g, '');
+  }
+
+  private resolveProvider(provider: string): string {
+    return PROVIDER_MAP[provider] || provider;
   }
 
   private generateReference(): string {
     return `TXN-${Date.now()}-${Math.floor(Math.random() * 9999)}`;
   }
 
-  // ==================== DEPOSIT (client envoie de l'argent) ====================
+  // ==================== DEPOT (client envoie de l'argent vers GFS) ====================
 
   async initiateDeposit(params: {
     accountId: string;
     amount: number;
     phone: string;
-    provider: PawaPayProvider;
+    provider: string;
     agencyId: string;
     description?: string;
-    initiatedBy?: string; // userId staff ou clientId
+    initiatedBy?: string;
   }) {
-    if (!this.apiToken) throw new BadRequestException('pawaPay non configure (PAWAPAY_API_TOKEN manquant)');
+    if (!this.apiKey) throw new BadRequestException('KPay non configure (KPAY_API_KEY manquant)');
 
     const account = await this.prisma.account.findUnique({
       where: { id: params.accountId },
@@ -67,8 +85,10 @@ export class PawaPayService {
     });
     if (!account) throw new NotFoundException('Compte non trouve');
     if (account.status !== 'ACTIVE') throw new BadRequestException('Compte inactif');
+    if (params.amount < 50) throw new BadRequestException('Montant minimum : 50 FCFA');
 
-    const depositId = uuidv4();
+    const provider = this.resolveProvider(params.provider);
+    const externalId = `DEP-${uuidv4()}`;
     const reference = this.generateReference();
 
     // Creer la transaction en PENDING
@@ -82,76 +102,78 @@ export class PawaPayService {
         toAccountId: params.accountId,
         mobileMoneyProvider: params.provider as any,
         mobileMoneyPhone: params.phone,
-        mobileMoneyRef: depositId,
+        mobileMoneyRef: externalId,
         agencyId: params.agencyId,
         status: 'PENDING',
-        description: params.description || `Depot Mobile Money ${params.provider}`,
+        description: params.description || `Depot Mobile Money ${PROVIDER_DISPLAY[provider] || provider}`,
       },
     });
 
-    // Appel API pawaPay
+    // Appel API KPay
     try {
       const body = {
-        depositId,
-        amount: String(Math.round(params.amount)),
-        currency: this.currency,
-        correspondent: PROVIDER_MAP[params.provider],
-        payer: {
-          type: 'MSISDN',
-          address: { value: this.formatPhone(params.phone) },
-        },
-        statementDescription: (params.description || 'Depot GFS').slice(0, 22),
-        callbackUrl: `${this.callbackUrl}/pawapay/callback/deposit`,
+        amount: Math.round(params.amount),
+        provider,
+        phoneNumber: this.formatPhone(params.phone),
+        externalId,
+        description: (params.description || 'Depot GFSolutions').slice(0, 100),
       };
 
-      this.logger.log(`[PawaPay] Depot initie: ${depositId} — ${params.amount} XAF — ${params.provider}`);
+      this.logger.log(`[KPay] Depot initie: ${externalId} — ${params.amount} XAF — ${provider}`);
 
-      const res = await fetch(`${this.baseUrl}/v2/deposits`, {
+      const res = await fetch(`${this.baseUrl}/api/v1/payments/init`, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify(body),
       });
 
       const data = await res.json();
-      this.logger.log(`[PawaPay] Reponse depot: ${JSON.stringify(data)}`);
+      this.logger.log(`[KPay] Reponse depot: ${JSON.stringify(data)}`);
 
-      if (!res.ok || data.status === 'REJECTED') {
+      if (!res.ok) {
         await this.prisma.transaction.update({
           where: { id: transaction.id },
-          data: { status: 'FAILED', description: `Rejete: ${data.rejectionReason?.rejectionCode || 'ERREUR'}` },
+          data: { status: 'FAILED', description: `Rejete: ${data.message || 'ERREUR'}` },
         });
-        throw new BadRequestException(`Depot rejete: ${data.rejectionReason?.rejectionCode || 'Erreur pawaPay'}`);
+        throw new BadRequestException(`Depot rejete: ${data.message || 'Erreur KPay'}`);
       }
+
+      // Mettre a jour avec l'ID KPay
+      await this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { mobileMoneyRef: data.id || externalId },
+      });
 
       return {
         success: true,
-        depositId,
+        paymentId: data.id,
         transactionId: transaction.id,
         reference,
+        status: data.status,
         message: 'Demande de depot envoyee. Le client doit confirmer sur son telephone.',
       };
     } catch (err) {
       if (err instanceof BadRequestException) throw err;
-      this.logger.error(`[PawaPay] Erreur depot: ${err.message}`);
+      this.logger.error(`[KPay] Erreur depot: ${err.message}`);
       await this.prisma.transaction.update({
         where: { id: transaction.id },
         data: { status: 'FAILED' },
       });
-      throw new BadRequestException('Erreur communication pawaPay: ' + err.message);
+      throw new BadRequestException('Erreur communication KPay: ' + err.message);
     }
   }
 
-  // ==================== PAYOUT (on envoie de l'argent au client) ====================
+  // ==================== RETRAIT (GFS envoie de l'argent au client) ====================
 
   async initiatePayout(params: {
     accountId: string;
     amount: number;
     phone: string;
-    provider: PawaPayProvider;
+    provider: string;
     agencyId: string;
     description?: string;
   }) {
-    if (!this.apiToken) throw new BadRequestException('pawaPay non configure (PAWAPAY_API_TOKEN manquant)');
+    if (!this.apiKey) throw new BadRequestException('KPay non configure (KPAY_API_KEY manquant)');
 
     const account = await this.prisma.account.findUnique({
       where: { id: params.accountId },
@@ -159,12 +181,14 @@ export class PawaPayService {
     });
     if (!account) throw new NotFoundException('Compte non trouve');
     if (account.status !== 'ACTIVE') throw new BadRequestException('Compte inactif');
+    if (params.amount < 100) throw new BadRequestException('Montant minimum retrait : 100 FCFA');
     if (Number(account.balance) < params.amount) throw new BadRequestException('Solde insuffisant');
 
-    const payoutId = uuidv4();
+    const provider = this.resolveProvider(params.provider);
+    const externalId = `WDR-${uuidv4()}`;
     const reference = this.generateReference();
 
-    // Debiter le compte immediatement (PENDING = fonds reserves)
+    // Debiter le compte immediatement (fonds reserves)
     await this.prisma.account.update({
       where: { id: params.accountId },
       data: { balance: { decrement: params.amount } },
@@ -180,39 +204,34 @@ export class PawaPayService {
         fromAccountId: params.accountId,
         mobileMoneyProvider: params.provider as any,
         mobileMoneyPhone: params.phone,
-        mobileMoneyRef: payoutId,
+        mobileMoneyRef: externalId,
         agencyId: params.agencyId,
         status: 'PENDING',
-        description: params.description || `Retrait Mobile Money ${params.provider}`,
+        description: params.description || `Retrait Mobile Money ${PROVIDER_DISPLAY[provider] || provider}`,
       },
     });
 
     try {
       const body = {
-        payoutId,
-        amount: String(Math.round(params.amount)),
-        currency: this.currency,
-        correspondent: PROVIDER_MAP[params.provider],
-        recipient: {
-          type: 'MSISDN',
-          address: { value: this.formatPhone(params.phone) },
-        },
-        statementDescription: (params.description || 'Retrait GFS').slice(0, 22),
-        callbackUrl: `${this.callbackUrl}/pawapay/callback/payout`,
+        amount: Math.round(params.amount),
+        provider,
+        phoneNumber: this.formatPhone(params.phone),
+        externalId,
+        description: (params.description || 'Retrait GFSolutions').slice(0, 100),
       };
 
-      this.logger.log(`[PawaPay] Payout initie: ${payoutId} — ${params.amount} XAF — ${params.provider}`);
+      this.logger.log(`[KPay] Retrait initie: ${externalId} — ${params.amount} XAF — ${provider}`);
 
-      const res = await fetch(`${this.baseUrl}/v2/payouts`, {
+      const res = await fetch(`${this.baseUrl}/api/v1/payments/withdraw`, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify(body),
       });
 
       const data = await res.json();
-      this.logger.log(`[PawaPay] Reponse payout: ${JSON.stringify(data)}`);
+      this.logger.log(`[KPay] Reponse retrait: ${JSON.stringify(data)}`);
 
-      if (!res.ok || data.status === 'REJECTED') {
+      if (!res.ok) {
         // Reverser le debit
         await this.prisma.account.update({
           where: { id: params.accountId },
@@ -220,17 +239,23 @@ export class PawaPayService {
         });
         await this.prisma.transaction.update({
           where: { id: transaction.id },
-          data: { status: 'FAILED', description: `Rejete: ${data.rejectionReason?.rejectionCode || 'ERREUR'}` },
+          data: { status: 'FAILED', description: `Rejete: ${data.message || 'ERREUR'}` },
         });
-        throw new BadRequestException(`Payout rejete: ${data.rejectionReason?.rejectionCode || 'Erreur pawaPay'}`);
+        throw new BadRequestException(`Retrait rejete: ${data.message || 'Erreur KPay'}`);
       }
+
+      await this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { mobileMoneyRef: data.id || externalId },
+      });
 
       return {
         success: true,
-        payoutId,
+        withdrawalId: data.id,
         transactionId: transaction.id,
         reference,
-        message: 'Virement Mobile Money initie. Traitement en cours.',
+        status: data.status,
+        message: 'Retrait initie. Transfert en cours vers le Mobile Money.',
       };
     } catch (err) {
       if (err instanceof BadRequestException) throw err;
@@ -243,165 +268,177 @@ export class PawaPayService {
         where: { id: transaction.id },
         data: { status: 'FAILED' },
       });
-      throw new BadRequestException('Erreur communication pawaPay: ' + err.message);
+      throw new BadRequestException('Erreur communication KPay: ' + err.message);
     }
   }
 
-  // ==================== CALLBACKS ====================
+  // ==================== WEBHOOK KPAY ====================
 
-  async handleDepositCallback(payload: any) {
-    this.logger.log(`[PawaPay] Callback depot: ${JSON.stringify(payload)}`);
+  async handleWebhook(payload: any) {
+    this.logger.log(`[KPay] Webhook recu: ${JSON.stringify(payload)}`);
 
-    const { depositId, status, amount } = payload;
-    if (!depositId) return { received: true };
+    const { event, paymentId, status, externalId, amount, failureReason } = payload;
 
-    const transaction = await this.prisma.transaction.findFirst({
-      where: { mobileMoneyRef: depositId },
-      include: { toAccount: { include: { client: true } } },
+    if (!paymentId && !externalId) return { received: true };
+
+    // Chercher la transaction par mobileMoneyRef (paymentId KPay ou externalId)
+    let transaction = await this.prisma.transaction.findFirst({
+      where: { mobileMoneyRef: paymentId },
+      include: {
+        toAccount: { include: { client: true } },
+        fromAccount: { include: { client: true } },
+      },
     });
 
+    if (!transaction && externalId) {
+      transaction = await this.prisma.transaction.findFirst({
+        where: { mobileMoneyRef: externalId },
+        include: {
+          toAccount: { include: { client: true } },
+          fromAccount: { include: { client: true } },
+        },
+      });
+    }
+
     if (!transaction) {
-      this.logger.warn(`[PawaPay] Transaction non trouvee pour depositId: ${depositId}`);
+      this.logger.warn(`[KPay] Transaction non trouvee: paymentId=${paymentId}, externalId=${externalId}`);
       return { received: true };
     }
 
     if (transaction.status !== 'PENDING') return { received: true }; // Deja traite
 
+    const isDeposit = transaction.type === 'DEPOSIT';
+
     if (status === 'COMPLETED') {
-      // Crediter le compte
-      await this.prisma.account.update({
-        where: { id: transaction.toAccountId! },
-        data: { balance: { increment: Number(amount || transaction.amount) } },
-      });
+      if (isDeposit) {
+        // Crediter le compte
+        await this.prisma.account.update({
+          where: { id: transaction.toAccountId! },
+          data: { balance: { increment: Number(amount || transaction.amount) } },
+        });
 
-      const updatedTx = await this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: 'COMPLETED' },
-      });
+        await this.prisma.transaction.update({
+          where: { id: transaction.id },
+          data: { status: 'COMPLETED' },
+        });
 
-      // Ecriture comptable
-      try {
-        await this.accountingService.recordDeposit(
-          transaction.agencyId,
-          Number(transaction.amount),
-          Number(transaction.fees),
-          Number(transaction.tax),
-          transaction.reference,
-          true, // mobile money
-        );
-      } catch (e) {
-        this.logger.warn(`[COMPTA] Echec ecriture depot MM ${transaction.reference}: ${e.message}`);
+        // Ecriture comptable
+        try {
+          await this.accountingService.recordDeposit(
+            transaction.agencyId,
+            Number(transaction.amount),
+            Number(transaction.fees),
+            Number(transaction.tax),
+            transaction.reference,
+            true,
+          );
+        } catch (e) {
+          this.logger.warn(`[COMPTA] Echec ecriture depot MM: ${e.message}`);
+        }
+
+        // Alertes SMS + WhatsApp
+        if (transaction.toAccount?.client?.phone) {
+          const balance = await this.prisma.account.findUnique({
+            where: { id: transaction.toAccountId! },
+            select: { balance: true, accountNumber: true },
+          });
+          const phone = transaction.toAccount.client.phone;
+          const accNum = balance?.accountNumber || '';
+          const amt = Number(transaction.amount);
+          const bal = Number(balance?.balance || 0);
+
+          this.smsService.sendDepositAlert(phone, accNum, amt, bal).catch(() => {});
+          this.whatsappService.sendDepositAlert(phone, accNum, amt, bal).catch(() => {});
+        }
+
+        this.logger.log(`[KPay] Depot COMPLETE: ${transaction.reference} — ${transaction.amount} XAF`);
+      } else {
+        // Retrait confirme
+        await this.prisma.transaction.update({
+          where: { id: transaction.id },
+          data: { status: 'COMPLETED' },
+        });
+
+        try {
+          await this.accountingService.recordWithdrawal(
+            transaction.agencyId,
+            Number(transaction.amount),
+            Number(transaction.fees),
+            Number(transaction.tax),
+            transaction.reference,
+            true,
+          );
+        } catch (e) {
+          this.logger.warn(`[COMPTA] Echec ecriture retrait MM: ${e.message}`);
+        }
+
+        if (transaction.fromAccount?.client?.phone) {
+          const account = await this.prisma.account.findUnique({
+            where: { id: transaction.fromAccountId! },
+            select: { balance: true, accountNumber: true },
+          });
+          const phone = transaction.fromAccount.client.phone;
+          const accNum = account?.accountNumber || '';
+          const amt = Number(transaction.amount);
+          const bal = Number(account?.balance || 0);
+
+          this.smsService.sendWithdrawalAlert(phone, accNum, amt, bal).catch(() => {});
+          this.whatsappService.sendWithdrawalAlert(phone, accNum, amt, bal).catch(() => {});
+        }
+
+        this.logger.log(`[KPay] Retrait COMPLETE: ${transaction.reference}`);
       }
 
-      // SMS confirmation
-      if (transaction.toAccount?.client?.phone) {
-        const balance = await this.prisma.account.findUnique({ where: { id: transaction.toAccountId! }, select: { balance: true, accountNumber: true } });
-        this.smsService.sendDepositAlert(
-          transaction.toAccount.client.phone,
-          balance?.accountNumber || '',
-          Number(transaction.amount),
-          Number(balance?.balance || 0),
-        ).catch(() => {});
-      }
-
-      this.logger.log(`[PawaPay] Depot COMPLETE: ${transaction.reference} — ${transaction.amount} XAF`);
       return { received: true, status: 'COMPLETED', reference: transaction.reference };
     }
 
-    if (status === 'FAILED') {
+    if (status === 'FAILED' || status === 'CANCELLED') {
+      if (!isDeposit) {
+        // Reverser le debit pour les retraits echoues
+        await this.prisma.account.update({
+          where: { id: transaction.fromAccountId! },
+          data: { balance: { increment: Number(amount || transaction.amount) } },
+        });
+        this.logger.warn(`[KPay] Retrait ECHEC + remboursement: ${transaction.reference}`);
+      }
+
       await this.prisma.transaction.update({
         where: { id: transaction.id },
-        data: { status: 'FAILED', description: `Echec: ${payload.failureReason?.failureCode || 'INCONNU'}` },
+        data: { status: 'FAILED', description: `Echec: ${failureReason || 'INCONNU'}` },
       });
-      this.logger.warn(`[PawaPay] Depot ECHEC: ${transaction.reference}`);
+
+      this.logger.warn(`[KPay] ${isDeposit ? 'Depot' : 'Retrait'} ECHEC: ${transaction.reference}`);
     }
 
     return { received: true };
   }
 
-  async handlePayoutCallback(payload: any) {
-    this.logger.log(`[PawaPay] Callback payout: ${JSON.stringify(payload)}`);
+  // ==================== STATUT ====================
 
-    const { payoutId, status, amount } = payload;
-    if (!payoutId) return { received: true };
-
-    const transaction = await this.prisma.transaction.findFirst({
-      where: { mobileMoneyRef: payoutId },
-      include: { fromAccount: { include: { client: true } } },
+  async getDepositStatus(paymentId: string) {
+    if (!this.apiKey) return { configured: false };
+    const res = await fetch(`${this.baseUrl}/api/v1/payments/${paymentId}`, {
+      headers: this.headers,
     });
-
-    if (!transaction || transaction.status !== 'PENDING') return { received: true };
-
-    if (status === 'COMPLETED') {
-      await this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: 'COMPLETED' },
-      });
-
-      // Ecriture comptable
-      try {
-        await this.accountingService.recordWithdrawal(
-          transaction.agencyId,
-          Number(transaction.amount),
-          Number(transaction.fees),
-          Number(transaction.tax),
-          transaction.reference,
-          true,
-        );
-      } catch (e) {
-        this.logger.warn(`[COMPTA] Echec ecriture retrait MM ${transaction.reference}: ${e.message}`);
-      }
-
-      // SMS confirmation
-      if (transaction.fromAccount?.client?.phone) {
-        const account = await this.prisma.account.findUnique({ where: { id: transaction.fromAccountId! }, select: { balance: true, accountNumber: true } });
-        this.smsService.sendWithdrawalAlert(
-          transaction.fromAccount.client.phone,
-          account?.accountNumber || '',
-          Number(transaction.amount),
-          Number(account?.balance || 0),
-        ).catch(() => {});
-      }
-
-      this.logger.log(`[PawaPay] Payout COMPLETE: ${transaction.reference}`);
-    }
-
-    if (status === 'FAILED') {
-      // Reverser le debit
-      await this.prisma.account.update({
-        where: { id: transaction.fromAccountId! },
-        data: { balance: { increment: Number(amount || transaction.amount) } },
-      });
-      await this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: 'FAILED', description: `Echec: ${payload.failureReason?.failureCode || 'INCONNU'}` },
-      });
-      this.logger.warn(`[PawaPay] Payout ECHEC + remboursement: ${transaction.reference}`);
-    }
-
-    return { received: true };
-  }
-
-  // ==================== STATUS ====================
-
-  async getDepositStatus(depositId: string) {
-    const res = await fetch(`${this.baseUrl}/v2/deposits/${depositId}`, { headers: this.headers });
     return res.json();
   }
 
-  async getPayoutStatus(payoutId: string) {
-    const res = await fetch(`${this.baseUrl}/v2/payouts/${payoutId}`, { headers: this.headers });
+  async getPayoutStatus(withdrawalId: string) {
+    if (!this.apiKey) return { configured: false };
+    const res = await fetch(`${this.baseUrl}/api/v1/payments/withdraw/${withdrawalId}`, {
+      headers: this.headers,
+    });
     return res.json();
   }
 
   async getAvailability() {
-    if (!this.apiToken) return { configured: false };
-    try {
-      const res = await fetch(`${this.baseUrl}/availability`, { headers: this.headers });
-      const data = await res.json();
-      return { configured: true, ...data };
-    } catch {
-      return { configured: true, error: 'Impossible de joindre pawaPay' };
-    }
+    if (!this.apiKey) return { configured: false, message: 'KPay non configure' };
+    return {
+      configured: true,
+      providers: [
+        { code: 'MTN_MOMO_CMR', name: 'MTN MoMo', country: 'CMR', currency: 'XAF' },
+        { code: 'ORANGE_CMR', name: 'Orange Money', country: 'CMR', currency: 'XAF' },
+      ],
+    };
   }
 }
