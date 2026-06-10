@@ -32,6 +32,7 @@ export class PawaPayService {
   private secretKey: string;
   private callbackUrl: string;
   private readonly currency = 'XAF';
+  private enabledProviders: string[] = [];
 
   constructor(
     private prisma: PrismaService,
@@ -55,7 +56,8 @@ export class PawaPayService {
       if (map['kpay_api_key']) this.apiKey = map['kpay_api_key'];
       if (map['kpay_secret_key']) this.secretKey = map['kpay_secret_key'];
       if (map['kpay_callback_url']) this.callbackUrl = map['kpay_callback_url'];
-      this.logger.log(`Config KPay chargee depuis la DB (apiKey: ${this.apiKey ? '***' + this.apiKey.slice(-8) : 'non configure'})`);
+      try { this.enabledProviders = JSON.parse(map['kpay_enabled_providers'] || '[]'); } catch { this.enabledProviders = []; }
+      this.logger.log(`Config KPay chargee depuis la DB (apiKey: ${this.apiKey ? '***' + this.apiKey.slice(-8) : 'non configure'}, providers: ${this.enabledProviders.length})`);
     } catch (e) {
       this.logger.warn(`Impossible de charger la config KPay depuis la DB: ${e.message}`);
     }
@@ -104,6 +106,9 @@ export class PawaPayService {
     if (params.amount < 50) throw new BadRequestException('Montant minimum : 50 FCFA');
 
     const provider = this.resolveProvider(params.provider);
+    if (this.enabledProviders.length > 0 && !this.enabledProviders.includes(provider)) {
+      throw new BadRequestException(`Operateur ${provider} non active. Contactez l'administrateur.`);
+    }
     const externalId = `DEP-${uuidv4()}`;
     const reference = this.generateReference();
 
@@ -132,7 +137,7 @@ export class PawaPayService {
         provider,
         phoneNumber: this.formatPhone(params.phone),
         externalId,
-        description: (params.description || 'Depot GFSolutions').slice(0, 100),
+        description: 'GFSolutions',
       };
 
       this.logger.log(`[KPay] Depot initie: ${externalId} — ${params.amount} XAF — ${provider}`);
@@ -201,6 +206,9 @@ export class PawaPayService {
     if (Number(account.balance) < params.amount) throw new BadRequestException('Solde insuffisant');
 
     const provider = this.resolveProvider(params.provider);
+    if (this.enabledProviders.length > 0 && !this.enabledProviders.includes(provider)) {
+      throw new BadRequestException(`Operateur ${provider} non active. Contactez l'administrateur.`);
+    }
     const externalId = `WDR-${uuidv4()}`;
     const reference = this.generateReference();
 
@@ -233,7 +241,7 @@ export class PawaPayService {
         provider,
         phoneNumber: this.formatPhone(params.phone),
         externalId,
-        description: (params.description || 'Retrait GFSolutions').slice(0, 100),
+        description: 'GFSolutions',
       };
 
       this.logger.log(`[KPay] Retrait initie: ${externalId} — ${params.amount} XAF — ${provider}`);
@@ -449,12 +457,22 @@ export class PawaPayService {
 
   async getAvailability() {
     if (!this.apiKey) return { configured: false, message: 'KPay non configure' };
-    return {
-      configured: true,
-      providers: [
-        { code: 'MTN_MOMO_CMR', name: 'MTN MoMo', country: 'CMR', currency: 'XAF' },
-        { code: 'ORANGE_CMR', name: 'Orange Money', country: 'CMR', currency: 'XAF' },
-      ],
-    };
+    const allProviders = [
+      { code: 'MTN_MOMO_CMR', name: 'MTN MoMo', country: 'CMR', currency: 'XAF' },
+      { code: 'ORANGE_CMR', name: 'Orange Money', country: 'CMR', currency: 'XAF' },
+      { code: 'ORANGE_SEN', name: 'Orange Money', country: 'SEN', currency: 'XOF' },
+      { code: 'WAVE_SEN', name: 'Wave', country: 'SEN', currency: 'XOF' },
+      { code: 'FREE_SEN', name: 'Free Money', country: 'SEN', currency: 'XOF' },
+      { code: 'MTN_MOMO_CIV', name: 'MTN MoMo', country: 'CIV', currency: 'XOF' },
+      { code: 'ORANGE_CIV', name: 'Orange Money', country: 'CIV', currency: 'XOF' },
+      { code: 'WAVE_CIV', name: 'Wave', country: 'CIV', currency: 'XOF' },
+      { code: 'MOOV_CIV', name: 'Moov Money', country: 'CIV', currency: 'XOF' },
+      { code: 'MPESA_KEN', name: 'M-Pesa', country: 'KEN', currency: 'KES' },
+      { code: 'MTN_MOMO_GHA', name: 'MTN MoMo', country: 'GHA', currency: 'GHS' },
+    ];
+    const providers = this.enabledProviders.length > 0
+      ? allProviders.filter(p => this.enabledProviders.includes(p.code))
+      : allProviders.filter(p => ['MTN_MOMO_CMR', 'ORANGE_CMR'].includes(p.code));
+    return { configured: true, enabledProviders: this.enabledProviders, providers };
   }
 }

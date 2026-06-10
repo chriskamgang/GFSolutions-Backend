@@ -267,6 +267,7 @@ export class TransactionsService {
       raisonSociale: account.client.raisonSociale,
       formeJuridique: account.client.formeJuridique,
       signatureRule: account.client.signatureRule,
+      signataireIdField: 'id',
       signataires: mandataires.map(m => ({
         id: m.clientPhysique.id,
         mandataireId: m.id,

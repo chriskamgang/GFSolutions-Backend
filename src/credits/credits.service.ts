@@ -128,6 +128,16 @@ export class CreditsService {
 
     const creditNumber = `CRD-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
+    // Valider les types de garantie
+    const validGuaranteeTypes = ['REAL_ESTATE', 'ENDORSEMENT', 'PLEDGE', 'BLOCKED_SAVINGS', 'SALARY_GUARANTEE', 'VEHICLE', 'EQUIPMENT', 'STOCK', 'PERSONAL_GUARANTEE', 'JOINT_GUARANTEE'];
+    if (dto.guarantees?.length) {
+      for (const g of dto.guarantees) {
+        if (!validGuaranteeTypes.includes(g.type)) {
+          throw new BadRequestException(`Type de garantie invalide: "${g.type}". Types acceptes: ${validGuaranteeTypes.join(', ')}`);
+        }
+      }
+    }
+
     const credit = await this.prisma.credit.create({
       data: {
         creditNumber,

@@ -228,19 +228,23 @@ export class SettingsService {
     const settings = await this.prisma.setting.findMany({ where: { category: 'kpay' } });
     const map: Record<string, string> = {};
     for (const s of settings) map[s.key] = s.value;
+    let enabledProviders: string[] = [];
+    try { enabledProviders = JSON.parse(map['kpay_enabled_providers'] || '[]'); } catch {}
     return {
       apiKey: map['kpay_api_key'] || '',
       secretKeyConfigured: !!map['kpay_secret_key'],
       callbackUrl: map['kpay_callback_url'] || '',
       enabled: map['kpay_enabled'] !== 'false',
+      enabledProviders,
     };
   }
 
-  async saveKpayConfig(data: { apiKey: string; secretKey?: string; callbackUrl: string; enabled: boolean }) {
+  async saveKpayConfig(data: { apiKey: string; secretKey?: string; callbackUrl: string; enabled: boolean; enabledProviders?: string[] }) {
     const upserts = [
       this.prisma.setting.upsert({ where: { key: 'kpay_api_key' }, update: { value: data.apiKey }, create: { key: 'kpay_api_key', value: data.apiKey, category: 'kpay', description: 'Cle API KPay' } }),
       this.prisma.setting.upsert({ where: { key: 'kpay_callback_url' }, update: { value: data.callbackUrl }, create: { key: 'kpay_callback_url', value: data.callbackUrl, category: 'kpay', description: 'URL callback KPay' } }),
       this.prisma.setting.upsert({ where: { key: 'kpay_enabled' }, update: { value: data.enabled ? 'true' : 'false' }, create: { key: 'kpay_enabled', value: data.enabled ? 'true' : 'false', category: 'kpay', description: 'KPay actif' } }),
+      this.prisma.setting.upsert({ where: { key: 'kpay_enabled_providers' }, update: { value: JSON.stringify(data.enabledProviders || []) }, create: { key: 'kpay_enabled_providers', value: JSON.stringify(data.enabledProviders || []), category: 'kpay', description: 'Operateurs KPay actives' } }),
     ];
     if (data.secretKey) {
       upserts.push(this.prisma.setting.upsert({ where: { key: 'kpay_secret_key' }, update: { value: data.secretKey }, create: { key: 'kpay_secret_key', value: data.secretKey, category: 'kpay', description: 'Cle secrete KPay' } }));

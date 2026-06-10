@@ -222,7 +222,7 @@ export class SettingsController {
   @Permissions('SETTINGS:UPDATE')
   @ApiOperation({ summary: 'Sauvegarder la configuration KPay Mobile Money' })
   async saveKpayConfig(
-    @Body() body: { apiKey: string; secretKey?: string; callbackUrl: string; enabled: boolean },
+    @Body() body: { apiKey: string; secretKey?: string; callbackUrl: string; enabled: boolean; enabledProviders?: string[] },
   ) {
     const result = await this.settingsService.saveKpayConfig(body);
     // Recharger la config KPay en memoire
