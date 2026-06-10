@@ -221,4 +221,31 @@ export class SettingsService {
     }
     return this.prisma.savingsProduct.update({ where: { id }, data });
   }
+
+  // ==================== KPAY (Mobile Money) ====================
+
+  async getKpayConfig() {
+    const settings = await this.prisma.setting.findMany({ where: { category: 'kpay' } });
+    const map: Record<string, string> = {};
+    for (const s of settings) map[s.key] = s.value;
+    return {
+      apiKey: map['kpay_api_key'] || '',
+      secretKeyConfigured: !!map['kpay_secret_key'],
+      callbackUrl: map['kpay_callback_url'] || '',
+      enabled: map['kpay_enabled'] !== 'false',
+    };
+  }
+
+  async saveKpayConfig(data: { apiKey: string; secretKey?: string; callbackUrl: string; enabled: boolean }) {
+    const upserts = [
+      this.prisma.setting.upsert({ where: { key: 'kpay_api_key' }, update: { value: data.apiKey }, create: { key: 'kpay_api_key', value: data.apiKey, category: 'kpay', description: 'Cle API KPay' } }),
+      this.prisma.setting.upsert({ where: { key: 'kpay_callback_url' }, update: { value: data.callbackUrl }, create: { key: 'kpay_callback_url', value: data.callbackUrl, category: 'kpay', description: 'URL callback KPay' } }),
+      this.prisma.setting.upsert({ where: { key: 'kpay_enabled' }, update: { value: data.enabled ? 'true' : 'false' }, create: { key: 'kpay_enabled', value: data.enabled ? 'true' : 'false', category: 'kpay', description: 'KPay actif' } }),
+    ];
+    if (data.secretKey) {
+      upserts.push(this.prisma.setting.upsert({ where: { key: 'kpay_secret_key' }, update: { value: data.secretKey }, create: { key: 'kpay_secret_key', value: data.secretKey, category: 'kpay', description: 'Cle secrete KPay' } }));
+    }
+    await Promise.all(upserts);
+    return { success: true, message: 'Configuration KPay sauvegardee' };
+  }
 }

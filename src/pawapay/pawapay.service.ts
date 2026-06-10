@@ -28,9 +28,9 @@ const PROVIDER_MAP: Record<string, string> = {
 export class PawaPayService {
   private readonly logger = new Logger('KPayService');
   private readonly baseUrl = 'https://admin.kpay.site';
-  private readonly apiKey: string;
-  private readonly secretKey: string;
-  private readonly callbackUrl: string;
+  private apiKey: string;
+  private secretKey: string;
+  private callbackUrl: string;
   private readonly currency = 'XAF';
 
   constructor(
@@ -43,6 +43,22 @@ export class PawaPayService {
     this.apiKey = this.configService.get<string>('KPAY_API_KEY', '');
     this.secretKey = this.configService.get<string>('KPAY_SECRET_KEY', '');
     this.callbackUrl = this.configService.get<string>('KPAY_CALLBACK_URL', '');
+    // Charger depuis la DB au demarrage
+    this.loadConfigFromDb().catch(() => {});
+  }
+
+  async loadConfigFromDb() {
+    try {
+      const settings = await this.prisma.setting.findMany({ where: { category: 'kpay' } });
+      const map: Record<string, string> = {};
+      for (const s of settings) map[s.key] = s.value;
+      if (map['kpay_api_key']) this.apiKey = map['kpay_api_key'];
+      if (map['kpay_secret_key']) this.secretKey = map['kpay_secret_key'];
+      if (map['kpay_callback_url']) this.callbackUrl = map['kpay_callback_url'];
+      this.logger.log(`Config KPay chargee depuis la DB (apiKey: ${this.apiKey ? '***' + this.apiKey.slice(-8) : 'non configure'})`);
+    } catch (e) {
+      this.logger.warn(`Impossible de charger la config KPay depuis la DB: ${e.message}`);
+    }
   }
 
   private get headers() {

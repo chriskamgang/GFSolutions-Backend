@@ -12,6 +12,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ContributionFrequency } from '@prisma/client';
 import { SettingsService } from './settings.service';
 import { SmsService } from '../sms/sms.service';
+import { PawaPayService } from '../pawapay/pawapay.service';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 
@@ -23,6 +24,7 @@ export class SettingsController {
   constructor(
     private settingsService: SettingsService,
     private smsService: SmsService,
+    private kpayService: PawaPayService,
   ) {}
 
   // ==================== GET ALL SETTINGS ====================
@@ -205,5 +207,26 @@ export class SettingsController {
     },
   ) {
     return this.settingsService.updateSavingsProduct(id, body);
+  }
+
+  // ==================== KPAY (Mobile Money) ====================
+
+  @Get('kpay')
+  @Permissions('SETTINGS:READ')
+  @ApiOperation({ summary: 'Lire la configuration KPay Mobile Money' })
+  getKpayConfig() {
+    return this.settingsService.getKpayConfig();
+  }
+
+  @Post('kpay')
+  @Permissions('SETTINGS:UPDATE')
+  @ApiOperation({ summary: 'Sauvegarder la configuration KPay Mobile Money' })
+  async saveKpayConfig(
+    @Body() body: { apiKey: string; secretKey?: string; callbackUrl: string; enabled: boolean },
+  ) {
+    const result = await this.settingsService.saveKpayConfig(body);
+    // Recharger la config KPay en memoire
+    await this.kpayService.loadConfigFromDb();
+    return result;
   }
 }
