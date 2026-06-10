@@ -162,8 +162,15 @@ export class PawaPayController {
   @Get('availability')
   @ApiBearerAuth()
   @UseGuards(AuthGuard('jwt'))
-  @ApiOperation({ summary: 'Verifier la disponibilite des operateurs KPay' })
+  @ApiOperation({ summary: 'Verifier la disponibilite des operateurs KPay (staff)' })
   getAvailability() {
+    return this.kpayService.getAvailability();
+  }
+
+  @Get('client/availability')
+  @UseGuards(AuthGuard('jwt-client'))
+  @ApiOperation({ summary: 'Verifier la disponibilite des operateurs KPay (app client)' })
+  getClientAvailability() {
     return this.kpayService.getAvailability();
   }
 }
