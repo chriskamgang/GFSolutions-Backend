@@ -24,6 +24,14 @@ const PROVIDER_MAP: Record<string, string> = {
   ORANGE_CMR: 'ORANGE_CMR',
 };
 
+// Mapping KPay -> Prisma enum MobileMoneyProvider
+const PROVIDER_TO_PRISMA: Record<string, string> = {
+  MTN_MOMO_CMR: 'MTN_MOMO',
+  ORANGE_CMR: 'ORANGE_MONEY',
+  MTN_MOMO: 'MTN_MOMO',
+  ORANGE_MONEY: 'ORANGE_MONEY',
+};
+
 @Injectable()
 export class PawaPayService {
   private readonly logger = new Logger('KPayService');
@@ -109,6 +117,7 @@ export class PawaPayService {
     if (this.enabledProviders.length > 0 && !this.enabledProviders.includes(provider)) {
       throw new BadRequestException(`Operateur ${provider} non active. Contactez l'administrateur.`);
     }
+    const prismaProvider = PROVIDER_TO_PRISMA[provider] || PROVIDER_TO_PRISMA[params.provider] || 'MTN_MOMO';
     const externalId = `DEP-${uuidv4()}`;
     const reference = this.generateReference();
 
@@ -121,7 +130,7 @@ export class PawaPayService {
         fees: 0,
         tax: 0,
         toAccountId: params.accountId,
-        mobileMoneyProvider: params.provider as any,
+        mobileMoneyProvider: prismaProvider as any,
         mobileMoneyPhone: params.phone,
         mobileMoneyRef: externalId,
         agencyId: params.agencyId,
@@ -209,6 +218,7 @@ export class PawaPayService {
     if (this.enabledProviders.length > 0 && !this.enabledProviders.includes(provider)) {
       throw new BadRequestException(`Operateur ${provider} non active. Contactez l'administrateur.`);
     }
+    const prismaProvider = PROVIDER_TO_PRISMA[provider] || PROVIDER_TO_PRISMA[params.provider] || 'MTN_MOMO';
     const externalId = `WDR-${uuidv4()}`;
     const reference = this.generateReference();
 
@@ -226,7 +236,7 @@ export class PawaPayService {
         fees: 0,
         tax: 0,
         fromAccountId: params.accountId,
-        mobileMoneyProvider: params.provider as any,
+        mobileMoneyProvider: prismaProvider as any,
         mobileMoneyPhone: params.phone,
         mobileMoneyRef: externalId,
         agencyId: params.agencyId,
