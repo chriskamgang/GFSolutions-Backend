@@ -146,7 +146,7 @@ export class PawaPayService {
         provider,
         phoneNumber: this.formatPhone(params.phone),
         externalId,
-        description: 'GFSolutions',
+        description: 'Depot aupres de GFSolutions',
       };
 
       this.logger.log(`[KPay] Depot initie: ${externalId} — ${params.amount} XAF — ${provider}`);
@@ -251,7 +251,7 @@ export class PawaPayService {
         provider,
         phoneNumber: this.formatPhone(params.phone),
         externalId,
-        description: 'GFSolutions',
+        description: 'Retrait aupres de GFSolutions',
       };
 
       this.logger.log(`[KPay] Retrait initie: ${externalId} — ${params.amount} XAF — ${provider}`);
@@ -500,7 +500,7 @@ export class PawaPayService {
       provider,
       phoneNumber: this.formatPhone(params.phone),
       externalId,
-      description: 'Recharge GFSolutions',
+      description: 'Approvisionnement compte GFSolutions',
     };
 
     this.logger.log(`[KPay] Recharge marchand initiee: ${externalId} — ${params.amount} XAF — ${provider}`);
