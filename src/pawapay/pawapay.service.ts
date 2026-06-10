@@ -163,7 +163,7 @@ export class PawaPayService {
       if (!res.ok) {
         await this.prisma.transaction.update({
           where: { id: transaction.id },
-          data: { status: 'FAILED', description: `Rejete: ${data.message || 'ERREUR'}` },
+          data: { status: 'FAILED', description: `Rejete: ${(data.message || 'ERREUR').slice(0, 180)}` },
         });
         throw new BadRequestException(`Depot rejete: ${data.message || 'Erreur KPay'}`);
       }
@@ -273,7 +273,7 @@ export class PawaPayService {
         });
         await this.prisma.transaction.update({
           where: { id: transaction.id },
-          data: { status: 'FAILED', description: `Rejete: ${data.message || 'ERREUR'}` },
+          data: { status: 'FAILED', description: `Rejete: ${(data.message || 'ERREUR').slice(0, 180)}` },
         });
         throw new BadRequestException(`Retrait rejete: ${data.message || 'Erreur KPay'}`);
       }
@@ -438,7 +438,7 @@ export class PawaPayService {
 
       await this.prisma.transaction.update({
         where: { id: transaction.id },
-        data: { status: 'FAILED', description: `Echec: ${failureReason || 'INCONNU'}` },
+        data: { status: 'FAILED', description: `Echec: ${(failureReason || 'INCONNU').slice(0, 180)}` },
       });
 
       this.logger.warn(`[KPay] ${isDeposit ? 'Depot' : 'Retrait'} ECHEC: ${transaction.reference}`);
