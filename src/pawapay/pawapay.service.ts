@@ -171,7 +171,7 @@ export class PawaPayService {
       // Mettre a jour avec l'ID KPay
       await this.prisma.transaction.update({
         where: { id: transaction.id },
-        data: { mobileMoneyRef: data.id || externalId },
+        data: { mobileMoneyRef: data.id || externalId, isTest: !!data.isTest },
       });
 
       return {
@@ -280,7 +280,7 @@ export class PawaPayService {
 
       await this.prisma.transaction.update({
         where: { id: transaction.id },
-        data: { mobileMoneyRef: data.id || externalId },
+        data: { mobileMoneyRef: data.id || externalId, isTest: !!data.isTest },
       });
 
       return {

@@ -814,12 +814,14 @@ export class TransactionsService {
     endDate?: string;
     page?: number;
     limit?: number;
+    isTest?: boolean;
   }) {
-    const { agencyId, accountId, type, startDate, endDate, page = 1, limit = 20 } = params;
+    const { agencyId, accountId, type, startDate, endDate, page = 1, limit = 20, isTest } = params;
 
     const where: any = {};
     if (agencyId) where.agencyId = agencyId;
     if (type) where.type = type;
+    if (isTest !== undefined) where.isTest = isTest;
     if (accountId) {
       where.OR = [
         { fromAccountId: accountId },

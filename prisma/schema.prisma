@@ -436,6 +436,7 @@ model Transaction {
   approvedById            String?
   approvedAt              DateTime?
   rejectedReason          String?
+  isTest            Boolean           @default(false)
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 

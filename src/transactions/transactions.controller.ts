@@ -93,6 +93,7 @@ export class TransactionsController {
     @Query('endDate') endDate?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('isTest') isTest?: string,
   ) {
     return this.transactionsService.findAll({
       agencyId,
@@ -102,6 +103,7 @@ export class TransactionsController {
       endDate,
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 20,
+      isTest: isTest === 'true' ? true : isTest === 'false' ? false : undefined,
     });
   }
 
