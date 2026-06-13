@@ -61,6 +61,39 @@ export class CompaniesService {
     });
   }
 
+  async addEmployee(companyId: string, data: { clientId?: string; phone?: string }) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) throw new NotFoundException('Entreprise non trouvee');
+
+    let client: any;
+
+    if (data.clientId) {
+      client = await this.prisma.client.findUnique({ where: { id: data.clientId } });
+    } else if (data.phone) {
+      client = await this.prisma.client.findFirst({ where: { phone: data.phone } });
+    }
+
+    if (!client) throw new NotFoundException('Client non trouve. Verifiez l\'ID ou le numero de telephone.');
+    if (client.companyId) throw new BadRequestException(`Ce client est deja lie a une entreprise.`);
+
+    return this.prisma.client.update({
+      where: { id: client.id },
+      data: { companyId },
+      include: { accounts: true },
+    });
+  }
+
+  async removeEmployee(companyId: string, clientId: string) {
+    const client = await this.prisma.client.findUnique({ where: { id: clientId } });
+    if (!client) throw new NotFoundException('Client non trouve');
+    if (client.companyId !== companyId) throw new BadRequestException('Ce client n\'appartient pas a cette entreprise');
+
+    return this.prisma.client.update({
+      where: { id: clientId },
+      data: { companyId: null },
+    });
+  }
+
   async processSalaryBatch(data: {
     companyId: string;
     payments: { employeeName: string; employeePhone: string; amount: number }[];

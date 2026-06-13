@@ -98,6 +98,29 @@ export class CreditsController {
     return this.creditsService.getRecoveryDashboard();
   }
 
+  // ==================== GARANTIES (routes prefixees, avant :id) ====================
+
+  @Patch('guarantees/:guaranteeId')
+  @Permissions('CREDITS:UPDATE')
+  @ApiOperation({ summary: 'Modifier une garantie' })
+  updateGuarantee(
+    @Param('guaranteeId') guaranteeId: string,
+    @Body() dto: any,
+    @CurrentUser() user: any,
+  ) {
+    return this.creditsService.updateGuarantee(guaranteeId, dto, user.sub);
+  }
+
+  @Patch('guarantees/:guaranteeId/release')
+  @Permissions('CREDITS:UPDATE')
+  @ApiOperation({ summary: 'Liberer une garantie' })
+  releaseGuarantee(
+    @Param('guaranteeId') guaranteeId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.creditsService.releaseGuarantee(guaranteeId, user.sub);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Detail d\'un credit' })
   @Permissions('CREDITS:READ')
@@ -179,5 +202,25 @@ export class CreditsController {
     @CurrentUser() user: any,
   ) {
     return this.creditsService.writeOff(id, body.reason, user.sub);
+  }
+
+  // ==================== GARANTIES (par credit) ====================
+
+  @Get(':id/guarantees')
+  @Permissions('CREDITS:READ')
+  @ApiOperation({ summary: 'Lister les garanties d\'un credit' })
+  getGuarantees(@Param('id') id: string) {
+    return this.creditsService.getGuarantees(id);
+  }
+
+  @Post(':id/guarantees')
+  @Permissions('CREDITS:CREATE')
+  @ApiOperation({ summary: 'Ajouter une garantie a un credit' })
+  addGuarantee(
+    @Param('id') id: string,
+    @Body() dto: any,
+    @CurrentUser() user: any,
+  ) {
+    return this.creditsService.addGuarantee(id, dto, user.sub);
   }
 }

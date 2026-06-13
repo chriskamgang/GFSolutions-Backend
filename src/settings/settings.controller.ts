@@ -222,11 +222,45 @@ export class SettingsController {
   @Permissions('SETTINGS:UPDATE')
   @ApiOperation({ summary: 'Sauvegarder la configuration KPay Mobile Money' })
   async saveKpayConfig(
-    @Body() body: { apiKey: string; secretKey?: string; callbackUrl: string; enabled: boolean; enabledProviders?: string[] },
+    @Body() body: {
+      mode?: string;
+      testApiKey?: string;
+      testSecretKey?: string;
+      liveApiKey?: string;
+      liveSecretKey?: string;
+      enabled?: boolean;
+      enabledProviders?: string[];
+      apiKey?: string;
+      secretKey?: string;
+      callbackUrl?: string;
+    },
   ) {
     const result = await this.settingsService.saveKpayConfig(body);
     // Recharger la config KPay en memoire
     await this.kpayService.loadConfigFromDb();
     return result;
+  }
+
+  // ==================== BACKUP / RESTAURATION ====================
+
+  @Get('backups')
+  @Permissions('SETTINGS:READ')
+  @ApiOperation({ summary: 'Lister les backups disponibles' })
+  listBackups() {
+    return this.settingsService.listBackups();
+  }
+
+  @Post('backups/create')
+  @Permissions('SETTINGS:UPDATE')
+  @ApiOperation({ summary: 'Creer un backup de la base de donnees' })
+  createBackup() {
+    return this.settingsService.createBackup();
+  }
+
+  @Post('backups/restore')
+  @Permissions('SETTINGS:UPDATE')
+  @ApiOperation({ summary: 'Restaurer un backup' })
+  restoreBackup(@Body() body: { filename: string }) {
+    return this.settingsService.restoreBackup(body.filename);
   }
 }

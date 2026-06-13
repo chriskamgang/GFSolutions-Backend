@@ -31,6 +31,8 @@ import { BillPaymentsModule } from './bill-payments/bill-payments.module';
 import { CallboxModule } from './callbox/callbox.module';
 import { PawaPayModule } from './pawapay/pawapay.module';
 import { PaymentGatewayModule } from './payment-gateway/payment-gateway.module';
+import { SolidarityGroupsModule } from './solidarity-groups/solidarity-groups.module';
+import { AmlModule } from './aml/aml.module';
 
 @Module({
   imports: [
@@ -65,6 +67,8 @@ import { PaymentGatewayModule } from './payment-gateway/payment-gateway.module';
     CallboxModule,
     PawaPayModule,
     PaymentGatewayModule,
+    SolidarityGroupsModule,
+    AmlModule,
   ],
   controllers: [AppController],
 })

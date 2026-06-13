@@ -7,6 +7,7 @@ import {
   Param,
   Body,
   Query,
+  Res,
   UseGuards,
   UseInterceptors,
   UploadedFile,
@@ -16,6 +17,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { ClientsService } from './clients.service';
+import { ImportService } from './import.service';
 import { CreateClientDto, UpdateClientDto, AddMandataireDto } from './dto/client.dto';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
@@ -26,7 +28,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('clients')
 export class ClientsController {
-  constructor(private clientsService: ClientsService) {}
+  constructor(
+    private clientsService: ClientsService,
+    private importService: ImportService,
+  ) {}
 
   @Post()
   @Permissions('CLIENTS:CREATE')
@@ -138,6 +143,14 @@ export class ClientsController {
     return this.clientsService.exportAll({ status, agencyId, clientType });
   }
 
+  @Get('map/gps')
+  @Permissions('CLIENTS:READ')
+  @ApiOperation({ summary: 'Clients avec coordonnees GPS (pour carte)' })
+  @ApiQuery({ name: 'agencyId', required: false })
+  getClientsWithGps(@Query('agencyId') agencyId?: string) {
+    return this.clientsService.getClientsWithGps(agencyId);
+  }
+
   @Get(':id')
   @Permissions('CLIENTS:READ')
   @ApiOperation({ summary: 'Voir un client (vue 360 avec mandataires)' })
@@ -184,6 +197,19 @@ export class ClientsController {
     return this.clientsService.activateMobileAccess(id);
   }
 
+  // ==================== GPS ====================
+
+  @Patch(':id/gps')
+  @Permissions('CLIENTS:UPDATE')
+  @ApiOperation({ summary: 'Mettre a jour les coordonnees GPS d\'un client' })
+  updateGps(
+    @Param('id') id: string,
+    @Body() dto: { latitude: number; longitude: number; accuracy?: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.clientsService.updateGps(id, dto, user.sub);
+  }
+
   // ==================== MANDATAIRES ====================
 
   @Post(':id/mandataires')
@@ -220,5 +246,38 @@ export class ClientsController {
   @ApiOperation({ summary: 'Retirer un mandataire' })
   removeMandataire(@Param('mandataireId') mandataireId: string, @CurrentUser() user: any) {
     return this.clientsService.removeMandataire(mandataireId, user.sub);
+  }
+
+  // ==================== IMPORT EXCEL ====================
+
+  @Post('import-excel/clients')
+  @Permissions('CLIENTS:CREATE')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Importer des clients depuis un fichier Excel (.xlsx)' })
+  @ApiConsumes('multipart/form-data')
+  importClientsExcel(@UploadedFile() file: any, @Body('agencyId') agencyId: string, @CurrentUser() user: any) {
+    if (!file) throw new BadRequestException('Fichier Excel requis');
+    return this.importService.importClients(file.buffer, agencyId || user.agencyId);
+  }
+
+  @Post('import-excel/accounts')
+  @Permissions('CLIENTS:CREATE')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Importer des comptes depuis un fichier Excel (.xlsx)' })
+  @ApiConsumes('multipart/form-data')
+  importAccountsExcel(@UploadedFile() file: any, @Body('agencyId') agencyId: string, @CurrentUser() user: any) {
+    if (!file) throw new BadRequestException('Fichier Excel requis');
+    return this.importService.importAccounts(file.buffer, agencyId || user.agencyId);
+  }
+
+  @Get('import-excel/template/:type')
+  @Permissions('CLIENTS:READ')
+  @ApiOperation({ summary: 'Telecharger le template Excel pour import' })
+  getImportTemplate(@Param('type') type: string, @Res() res: any) {
+    const validType = type === 'accounts' ? 'accounts' : 'clients';
+    const buffer = this.importService.generateTemplate(validType);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=template_${validType}.xlsx`);
+    res.send(buffer);
   }
 }

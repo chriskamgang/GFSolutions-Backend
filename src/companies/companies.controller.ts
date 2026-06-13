@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Param,
   Body,
   UseGuards,
@@ -56,6 +57,26 @@ export class CompaniesController {
   @ApiOperation({ summary: 'Employes d\'une entreprise' })
   getEmployees(@Param('id') id: string) {
     return this.companiesService.getEmployees(id);
+  }
+
+  @Post(':id/employees')
+  @Permissions('COMPANIES:CREATE')
+  @ApiOperation({ summary: 'Ajouter un employe (client existant) a une entreprise' })
+  addEmployee(
+    @Param('id') companyId: string,
+    @Body() body: { clientId?: string; phone?: string },
+  ) {
+    return this.companiesService.addEmployee(companyId, body);
+  }
+
+  @Delete(':id/employees/:clientId')
+  @Permissions('COMPANIES:CREATE')
+  @ApiOperation({ summary: 'Retirer un employe d\'une entreprise' })
+  removeEmployee(
+    @Param('id') companyId: string,
+    @Param('clientId') clientId: string,
+  ) {
+    return this.companiesService.removeEmployee(companyId, clientId);
   }
 
   @Post(':id/salary-batch')

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { ReportsService } from './reports.service';
@@ -100,5 +100,33 @@ export class ReportsController {
     @Query('endDate') endDate?: string,
   ) {
     return this.reportsService.getAccountOpeningsReport(startDate, endDate);
+  }
+
+  @Get('provisioning')
+  @Permissions('REPORTS:READ')
+  @ApiOperation({ summary: 'Calcul provisionnement creances douteuses (normes COBAC)' })
+  @ApiQuery({ name: 'agencyId', required: false })
+  getProvisioning(@Query('agencyId') agencyId?: string) {
+    return this.reportsService.calculateProvisioning(agencyId);
+  }
+
+  @Get('tafire')
+  @Permissions('REPORTS:READ')
+  @ApiOperation({ summary: 'TAFIRE - Tableau Financier des Ressources et Emplois (OHADA)' })
+  @ApiQuery({ name: 'year', required: true })
+  @ApiQuery({ name: 'agencyId', required: false })
+  getTafire(@Query('year') year: string, @Query('agencyId') agencyId?: string) {
+    return this.reportsService.generateTafire(parseInt(year) || new Date().getFullYear(), agencyId);
+  }
+
+  @Get('cobac/excel')
+  @Permissions('REPORTS:READ')
+  @ApiOperation({ summary: 'Telecharger le rapport COBAC complet au format Excel (xlsx)' })
+  async getCobacExcel(@Res() res: any) {
+    const buffer = await this.reportsService.generateCobacExcel();
+    const date = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=Rapport_COBAC_${date}.xlsx`);
+    res.send(buffer);
   }
 }

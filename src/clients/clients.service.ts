@@ -615,6 +615,50 @@ export class ClientsService {
     });
   }
 
+  // ==================== GPS ====================
+
+  async updateGps(id: string, dto: { latitude: number; longitude: number; accuracy?: string }, userId?: string) {
+    const client = await this.prisma.client.findUnique({ where: { id } });
+    if (!client) throw new NotFoundException('Client non trouve');
+
+    const result = await this.prisma.client.update({
+      where: { id },
+      data: {
+        gpsLatitude: dto.latitude,
+        gpsLongitude: dto.longitude,
+        gpsAccuracy: dto.accuracy || 'precise',
+      },
+    });
+
+    if (userId) {
+      this.auditService.log({
+        userId, action: 'UPDATE', module: 'CLIENTS',
+        entityId: id, entityType: 'Client',
+        details: `GPS mis a jour pour ${client.clientNumber}: ${dto.latitude}, ${dto.longitude}`,
+      }).catch(() => {});
+    }
+
+    return { gpsLatitude: result.gpsLatitude, gpsLongitude: result.gpsLongitude, gpsAccuracy: result.gpsAccuracy };
+  }
+
+  async getClientsWithGps(agencyId?: string) {
+    const where: any = {
+      gpsLatitude: { not: null },
+      gpsLongitude: { not: null },
+    };
+    if (agencyId) where.agencyId = agencyId;
+
+    return this.prisma.client.findMany({
+      where,
+      select: {
+        id: true, clientNumber: true, firstName: true, lastName: true, raisonSociale: true,
+        phone: true, address: true, city: true,
+        gpsLatitude: true, gpsLongitude: true, gpsAccuracy: true,
+        clientType: true, status: true,
+      },
+    });
+  }
+
   // ==================== MANDATAIRES ====================
 
   async addMandataire(clientMoraleId: string, dto: AddMandataireDto, userId?: string) {

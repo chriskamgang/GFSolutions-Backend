@@ -6,9 +6,10 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { SmsModule } from '../sms/sms.module';
 import { CreditsModule } from '../credits/credits.module';
 import { PaymentGatewayModule } from '../payment-gateway/payment-gateway.module';
+import { PawaPayModule } from '../pawapay/pawapay.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AccountingModule, NotificationsModule, SmsModule, CreditsModule, PaymentGatewayModule],
+  imports: [ScheduleModule.forRoot(), AccountingModule, NotificationsModule, SmsModule, CreditsModule, PaymentGatewayModule, PawaPayModule],
   providers: [SchedulerService],
 })
 export class SchedulerModule {}

@@ -89,27 +89,6 @@ export class PawaPayController {
     return this.kpayService.initiatePayout(body);
   }
 
-  // ==================== WEBHOOK KPAY ====================
-
-  @Post('webhook')
-  @ApiOperation({ summary: 'Webhook KPay (paiement et retrait)' })
-  handleWebhook(@Body() payload: any) {
-    return this.kpayService.handleWebhook(payload);
-  }
-
-  // Ancien format callbacks (redirige vers webhook unifie)
-  @Post('callback/deposit')
-  @ApiOperation({ summary: 'Callback depot (compatibilite)' })
-  depositCallback(@Body() payload: any) {
-    return this.kpayService.handleWebhook(payload);
-  }
-
-  @Post('callback/payout')
-  @ApiOperation({ summary: 'Callback retrait (compatibilite)' })
-  payoutCallback(@Body() payload: any) {
-    return this.kpayService.handleWebhook(payload);
-  }
-
   // ==================== SOLDE & RECHARGE MARCHAND ====================
 
   @Get('balance')

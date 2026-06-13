@@ -231,25 +231,128 @@ export class SettingsService {
     let enabledProviders: string[] = [];
     try { enabledProviders = JSON.parse(map['kpay_enabled_providers'] || '[]'); } catch {}
     return {
-      apiKey: map['kpay_api_key'] || '',
-      secretKeyConfigured: !!map['kpay_secret_key'],
-      callbackUrl: map['kpay_callback_url'] || '',
+      // Mode actif (live ou test)
+      mode: map['kpay_mode'] || 'test',
+      // Cles Test
+      testApiKey: map['kpay_test_api_key'] || map['kpay_api_key'] || '',
+      testSecretKeyConfigured: !!(map['kpay_test_secret_key'] || map['kpay_secret_key']),
+      // Cles Live
+      liveApiKey: map['kpay_live_api_key'] || '',
+      liveSecretKeyConfigured: !!map['kpay_live_secret_key'],
+      // Communs
       enabled: map['kpay_enabled'] !== 'false',
       enabledProviders,
     };
   }
 
-  async saveKpayConfig(data: { apiKey: string; secretKey?: string; callbackUrl: string; enabled: boolean; enabledProviders?: string[] }) {
-    const upserts = [
-      this.prisma.setting.upsert({ where: { key: 'kpay_api_key' }, update: { value: data.apiKey }, create: { key: 'kpay_api_key', value: data.apiKey, category: 'kpay', description: 'Cle API KPay' } }),
-      this.prisma.setting.upsert({ where: { key: 'kpay_callback_url' }, update: { value: data.callbackUrl }, create: { key: 'kpay_callback_url', value: data.callbackUrl, category: 'kpay', description: 'URL callback KPay' } }),
-      this.prisma.setting.upsert({ where: { key: 'kpay_enabled' }, update: { value: data.enabled ? 'true' : 'false' }, create: { key: 'kpay_enabled', value: data.enabled ? 'true' : 'false', category: 'kpay', description: 'KPay actif' } }),
-      this.prisma.setting.upsert({ where: { key: 'kpay_enabled_providers' }, update: { value: JSON.stringify(data.enabledProviders || []) }, create: { key: 'kpay_enabled_providers', value: JSON.stringify(data.enabledProviders || []), category: 'kpay', description: 'Operateurs KPay actives' } }),
-    ];
-    if (data.secretKey) {
-      upserts.push(this.prisma.setting.upsert({ where: { key: 'kpay_secret_key' }, update: { value: data.secretKey }, create: { key: 'kpay_secret_key', value: data.secretKey, category: 'kpay', description: 'Cle secrete KPay' } }));
-    }
-    await Promise.all(upserts);
+  async saveKpayConfig(data: {
+    mode?: string;
+    testApiKey?: string;
+    testSecretKey?: string;
+    liveApiKey?: string;
+    liveSecretKey?: string;
+    enabled?: boolean;
+    enabledProviders?: string[];
+    // Retro-compatibilite
+    apiKey?: string;
+    secretKey?: string;
+    callbackUrl?: string;
+  }) {
+    const upserts: any[] = [];
+
+    const upsert = (key: string, value: string, desc: string) =>
+      this.prisma.setting.upsert({ where: { key }, update: { value }, create: { key, value, category: 'kpay', description: desc } });
+
+    // Mode (live / test)
+    if (data.mode) upserts.push(upsert('kpay_mode', data.mode, 'Mode KPay (live ou test)'));
+
+    // Cles Test
+    if (data.testApiKey) upserts.push(upsert('kpay_test_api_key', data.testApiKey, 'Cle API KPay Test'));
+    if (data.testSecretKey) upserts.push(upsert('kpay_test_secret_key', data.testSecretKey, 'Cle Secrete KPay Test'));
+
+    // Cles Live
+    if (data.liveApiKey) upserts.push(upsert('kpay_live_api_key', data.liveApiKey, 'Cle API KPay Live'));
+    if (data.liveSecretKey) upserts.push(upsert('kpay_live_secret_key', data.liveSecretKey, 'Cle Secrete KPay Live'));
+
+    // Retro-compatibilite (ancien format -> test)
+    if (data.apiKey && !data.testApiKey) upserts.push(upsert('kpay_test_api_key', data.apiKey, 'Cle API KPay Test'));
+    if (data.secretKey && !data.testSecretKey) upserts.push(upsert('kpay_test_secret_key', data.secretKey, 'Cle Secrete KPay Test'));
+
+    if (data.enabled !== undefined) upserts.push(upsert('kpay_enabled', data.enabled ? 'true' : 'false', 'KPay actif'));
+    if (data.enabledProviders) upserts.push(upsert('kpay_enabled_providers', JSON.stringify(data.enabledProviders), 'Operateurs KPay actives'));
+
+    if (upserts.length > 0) await Promise.all(upserts);
     return { success: true, message: 'Configuration KPay sauvegardee' };
+  }
+
+  // ==================== BACKUP / RESTAURATION ====================
+
+  async listBackups() {
+    const fs = await import('fs');
+    const path = await import('path');
+    const backupDir = '/var/www/backups';
+
+    try {
+      if (!fs.existsSync(backupDir)) {
+        return { backups: [], directory: backupDir };
+      }
+
+      const files = fs.readdirSync(backupDir)
+        .filter((f: string) => f.endsWith('.sql') || f.endsWith('.sql.gz'))
+        .map((f: string) => {
+          const stats = fs.statSync(path.join(backupDir, f));
+          return {
+            filename: f,
+            size: stats.size,
+            sizeHuman: stats.size > 1048576 ? `${(stats.size / 1048576).toFixed(1)} MB` : `${(stats.size / 1024).toFixed(1)} KB`,
+            createdAt: stats.mtime,
+          };
+        })
+        .sort((a: any, b: any) => b.createdAt.getTime() - a.createdAt.getTime());
+
+      return { backups: files, directory: backupDir };
+    } catch {
+      return { backups: [], directory: backupDir, error: 'Impossible de lire le repertoire de backup' };
+    }
+  }
+
+  async createBackup() {
+    const { execSync } = await import('child_process');
+    const backupDir = '/var/www/backups';
+    const date = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `microfinance_${date}.sql.gz`;
+    const filepath = `${backupDir}/${filename}`;
+
+    try {
+      execSync(`mkdir -p ${backupDir}`);
+      execSync(`mysqldump -u gfs -p'GFS@2026#Secure' microfinance_db | gzip > ${filepath}`, { timeout: 120000 });
+      const fs = await import('fs');
+      const stats = fs.statSync(filepath);
+      return { success: true, filename, size: stats.size, path: filepath };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  async restoreBackup(filename: string) {
+    const { execSync } = await import('child_process');
+    const backupDir = '/var/www/backups';
+    const filepath = `${backupDir}/${filename}`;
+
+    const fs = await import('fs');
+    if (!fs.existsSync(filepath)) {
+      throw new NotFoundException(`Fichier de backup non trouve: ${filename}`);
+    }
+
+    try {
+      if (filename.endsWith('.gz')) {
+        execSync(`gunzip -c ${filepath} | mysql -u gfs -p'GFS@2026#Secure' microfinance_db`, { timeout: 300000 });
+      } else {
+        execSync(`mysql -u gfs -p'GFS@2026#Secure' microfinance_db < ${filepath}`, { timeout: 300000 });
+      }
+      return { success: true, message: `Restauration de ${filename} terminee` };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 }

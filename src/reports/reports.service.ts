@@ -561,6 +561,177 @@ export class ReportsService {
   }
 
   /**
+   * Provisionnement creances douteuses selon normes COBAC EMF
+   */
+  async calculateProvisioning(agencyId?: string) {
+    const now = new Date();
+    const credits = await this.prisma.credit.findMany({
+      where: {
+        status: { in: ['ACTIVE', 'DISBURSED', 'DEFAULTED'] },
+        ...(agencyId ? { client: { agencyId } } : {}),
+      },
+      include: {
+        client: { select: { id: true, firstName: true, lastName: true, clientNumber: true, agencyId: true } },
+        repayments: { where: { status: { in: ['PENDING', 'LATE', 'DEFAULTED'] } } },
+      },
+    });
+
+    const categories = {
+      saines: { label: 'Creances saines (0j)', rate: 0.01, credits: [] as any[], totalOutstanding: 0, provision: 0 },
+      preDouteuses: { label: 'Pre-douteuses (1-90j)', rate: 0.25, credits: [] as any[], totalOutstanding: 0, provision: 0 },
+      douteuses: { label: 'Douteuses (91-180j)', rate: 0.50, credits: [] as any[], totalOutstanding: 0, provision: 0 },
+      contentieuses: { label: 'Contentieuses (181-360j)', rate: 0.75, credits: [] as any[], totalOutstanding: 0, provision: 0 },
+      compromises: { label: 'Compromises (>360j)', rate: 1.00, credits: [] as any[], totalOutstanding: 0, provision: 0 },
+    };
+
+    for (const credit of credits) {
+      const outstanding = Number(credit.remainingAmount);
+      const overdueRepayments = credit.repayments.filter(r => r.dueDate < now);
+
+      let maxDaysLate = 0;
+      for (const r of overdueRepayments) {
+        const daysLate = Math.floor((now.getTime() - r.dueDate.getTime()) / (24 * 3600 * 1000));
+        if (daysLate > maxDaysLate) maxDaysLate = daysLate;
+      }
+
+      const creditInfo = {
+        creditNumber: credit.creditNumber,
+        clientName: `${credit.client.firstName || ''} ${credit.client.lastName || ''}`.trim(),
+        clientNumber: credit.client.clientNumber,
+        outstanding,
+        daysLate: maxDaysLate,
+      };
+
+      let cat: keyof typeof categories;
+      if (maxDaysLate === 0) cat = 'saines';
+      else if (maxDaysLate <= 90) cat = 'preDouteuses';
+      else if (maxDaysLate <= 180) cat = 'douteuses';
+      else if (maxDaysLate <= 360) cat = 'contentieuses';
+      else cat = 'compromises';
+
+      categories[cat].credits.push(creditInfo);
+      categories[cat].totalOutstanding += outstanding;
+      categories[cat].provision += Math.round(outstanding * categories[cat].rate);
+    }
+
+    const totalProvision = Object.values(categories).reduce((sum, c) => sum + c.provision, 0);
+    const totalOutstanding = Object.values(categories).reduce((sum, c) => sum + c.totalOutstanding, 0);
+    const coverageRate = totalOutstanding > 0 ? Math.round((totalProvision / totalOutstanding) * 10000) / 100 : 0;
+
+    return {
+      date: now.toISOString(),
+      totalCredits: credits.length,
+      totalOutstanding,
+      totalProvision,
+      coverageRate,
+      categories,
+    };
+  }
+
+  /**
+   * TAFIRE - Tableau Financier des Ressources et Emplois (OHADA)
+   */
+  async generateTafire(year: number, agencyId?: string) {
+    const startDate = new Date(year, 0, 1);
+    const endDate = new Date(year, 11, 31, 23, 59, 59);
+
+    const agencyFilter = agencyId ? { agencyId } : {};
+
+    const [deposits, withdrawals, loanDisbursements, loanRepayments, fees, interests] = await Promise.all([
+      this.prisma.transaction.aggregate({
+        where: { type: 'DEPOSIT', status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate }, ...agencyFilter },
+        _sum: { amount: true },
+        _count: true,
+      }),
+      this.prisma.transaction.aggregate({
+        where: { type: 'WITHDRAWAL', status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate }, ...agencyFilter },
+        _sum: { amount: true },
+        _count: true,
+      }),
+      this.prisma.transaction.aggregate({
+        where: { type: 'LOAN_DISBURSEMENT', status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate }, ...agencyFilter },
+        _sum: { amount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: { type: 'LOAN_REPAYMENT', status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate }, ...agencyFilter },
+        _sum: { amount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: { type: 'FEE', status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate }, ...agencyFilter },
+        _sum: { amount: true },
+      }),
+      this.prisma.transaction.aggregate({
+        where: { type: 'INTEREST', status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate }, ...agencyFilter },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const creditsEndPeriod = await this.prisma.credit.aggregate({
+      where: { status: { in: ['ACTIVE', 'DISBURSED'] }, disbursedAt: { lte: endDate } },
+      _sum: { remainingAmount: true },
+    });
+
+    const totalDeposits = Number(deposits._sum.amount || 0);
+    const totalWithdrawals = Number(withdrawals._sum.amount || 0);
+    const totalDisbursements = Number(loanDisbursements._sum.amount || 0);
+    const totalRepayments = Number(loanRepayments._sum.amount || 0);
+    const totalFees = Number(fees._sum.amount || 0);
+    const totalInterests = Number(interests._sum.amount || 0);
+
+    const produitsExploitation = totalRepayments + totalFees + totalInterests;
+    const chargesExploitation = totalDisbursements;
+    const fluxExploitation = produitsExploitation - chargesExploitation;
+
+    const fluxInvestissement = 0;
+
+    const ressourcesCollectees = totalDeposits;
+    const ressourcesRestituees = totalWithdrawals;
+    const fluxFinancement = ressourcesCollectees - ressourcesRestituees;
+
+    const variationTresorerie = fluxExploitation + fluxInvestissement + fluxFinancement;
+
+    return {
+      title: `TAFIRE - Exercice ${year}`,
+      year,
+      generatedAt: new Date().toISOString(),
+
+      exploitation: {
+        title: "I. Flux de tresorerie lies aux activites d'exploitation",
+        produits: {
+          remboursementsCredits: totalRepayments,
+          commissionsEtFrais: totalFees,
+          interetsPercus: totalInterests,
+          total: produitsExploitation,
+        },
+        charges: {
+          decaissementsCredits: totalDisbursements,
+          total: chargesExploitation,
+        },
+        fluxNet: fluxExploitation,
+      },
+
+      investissement: {
+        title: 'II. Flux de tresorerie lies aux activites d\'investissement',
+        acquisitionsImmobilisations: 0,
+        cessionsImmobilisations: 0,
+        fluxNet: fluxInvestissement,
+      },
+
+      financement: {
+        title: 'III. Flux de tresorerie lies aux activites de financement',
+        collecteDepots: ressourcesCollectees,
+        restitutionDepots: ressourcesRestituees,
+        fluxNet: fluxFinancement,
+      },
+
+      synthese: {
+        variationTresorerie,
+        encoursCreditsFin: Number(creditsEndPeriod._sum.remainingAmount || 0),
+      },
+    };
+  }
+
+  /**
    * Rapport reglementaire COBAC complet
    * Ratios prudentiels + situation patrimoniale + qualite portefeuille
    */
@@ -756,5 +927,105 @@ export class ReportsService {
         tauxActiviteClients: totalClients > 0 ? (activeClients / totalClients) * 100 : 0,
       },
     };
+  }
+
+  /**
+   * Genere le rapport COBAC complet au format Excel (xlsx)
+   * Feuille 1 : Ratios prudentiels
+   * Feuille 2 : Situation patrimoniale
+   * Feuille 3 : Qualite du portefeuille (PAR)
+   */
+  async generateCobacExcel(): Promise<Buffer> {
+    const XLSX = await import('xlsx');
+
+    const cobacData = await this.getCOBACReport();
+    const wb = XLSX.utils.book_new();
+
+    // ---- Feuille 1 : Ratios prudentiels ----
+    const ratiosSheet: any[][] = [
+      ['RAPPORT COBAC - RATIOS PRUDENTIELS'],
+      ['Date de generation', new Date().toLocaleDateString('fr-FR')],
+      ['Exercice', cobacData.exercice],
+      ['Score de conformite', cobacData.scoreConformite],
+      [''],
+      ['Ratio', 'Valeur (%)', 'Norme COBAC (%)', 'Comparaison', 'Description', 'Conformite'],
+    ];
+
+    for (const ratio of Object.values(cobacData.ratiosPrudentiels) as any[]) {
+      ratiosSheet.push([
+        ratio.label,
+        Number(ratio.valeur.toFixed(2)),
+        ratio.norme,
+        ratio.comparaison,
+        ratio.description,
+        ratio.conforme ? 'CONFORME' : 'NON CONFORME',
+      ]);
+    }
+
+    const ws1 = XLSX.utils.aoa_to_sheet(ratiosSheet);
+    ws1['!cols'] = [{ wch: 35 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 40 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Ratios Prudentiels');
+
+    // ---- Feuille 2 : Situation patrimoniale ----
+    const sp = cobacData.situationPatrimoniale;
+    const exp = cobacData.exploitation;
+    const patrimoineSheet: any[][] = [
+      ['SITUATION PATRIMONIALE'],
+      ['Date de generation', new Date().toLocaleDateString('fr-FR')],
+      [''],
+      ['ACTIF', 'Montant (FCFA)'],
+      ['Tresorerie (Caisse + Banque)', sp.tresorerie],
+      ['Encours de credits', sp.encourCredits],
+      ['Total Actifs', sp.totalActifs],
+      [''],
+      ['PASSIF / RESSOURCES', 'Montant (FCFA)'],
+      ['Depots courants', sp.depotsCourants],
+      ['Epargne', sp.epargne],
+      ['DAT (Depots a Terme)', sp.dat],
+      ['Total Depots Clients', sp.totalDepotsClients],
+      ['Fonds Propres', sp.fondsPropres],
+      [''],
+      ['EXPLOITATION (exercice en cours)', 'Montant (FCFA)'],
+      ['Total Produits', exp.totalProduits],
+      ['Total Charges', exp.totalCharges],
+      ['Resultat Net', exp.resultatNet],
+    ];
+
+    const ws2 = XLSX.utils.aoa_to_sheet(patrimoineSheet);
+    ws2['!cols'] = [{ wch: 38 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Situation Patrimoniale');
+
+    // ---- Feuille 3 : Qualite du portefeuille (PAR) ----
+    const qp = cobacData.qualitePortefeuille;
+    const ind = cobacData.indicateursGeneraux;
+    const parSheet: any[][] = [
+      ['QUALITE DU PORTEFEUILLE (PAR - Portfolio at Risk)'],
+      ['Date de generation', new Date().toLocaleDateString('fr-FR')],
+      [''],
+      ['PORTEFEUILLE CREDITS', ''],
+      ['Credits actifs', qp.creditsActifs],
+      ['Credits en attente', qp.creditsPending],
+      ['Credits en defaut', qp.creditsDefaulted],
+      ['Total credit decaisse', qp.totalCreditDecaisse],
+      ['Encours credits', qp.encourCredits],
+      [''],
+      ['PORTEFEUILLE A RISQUE', 'Montant (FCFA)', 'Taux (%)'],
+      ['PAR > 30 jours (norme COBAC <= 5%)', qp.par30.montant, Number(qp.par30.taux.toFixed(2))],
+      ['PAR > 90 jours', qp.par90.montant, Number(qp.par90.taux.toFixed(2))],
+      ['PAR > 180 jours', qp.par180.montant, Number(qp.par180.taux.toFixed(2))],
+      ['PAR > 360 jours', qp.par360.montant, Number(qp.par360.taux.toFixed(2))],
+      [''],
+      ['INDICATEURS GENERAUX', ''],
+      ['Total clients', ind.totalClients],
+      ['Clients actifs', ind.activeClients],
+      ["Taux d'activite clients (%)", Number(ind.tauxActiviteClients.toFixed(2))],
+      ['Total comptes actifs', ind.totalAccounts],
+    ];
+
+    const ws3 = XLSX.utils.aoa_to_sheet(parSheet);
+    ws3['!cols'] = [{ wch: 40 }, { wch: 20 }, { wch: 12 }];
+    XLSX.utils.book_append_sheet(wb, ws3, 'Qualite Portefeuille');
+
+    return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
   }
 }

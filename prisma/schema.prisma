@@ -166,6 +166,7 @@ model Agency {
   billPayments    BillPayment[]
   callboxes       Callbox[]
   merchants       Merchant[]
+  solidarityGroups SolidarityGroup[]
 
   @@map("agencies")
 }
@@ -240,6 +241,7 @@ model User {
   vaultMovementsApproved  VaultMovement[] @relation("VaultMovementApprover")
   billPayments    BillPayment[]
   merchantsCreated Merchant[]
+  amlAlertsAssigned AmlAlert[] @relation("AmlAlertAssignee")
 
   @@map("users")
 }
@@ -260,6 +262,9 @@ model Client {
   arrondissement  String?
   niu             String?
   planLocalisation String?        @db.LongText
+  gpsLatitude     Decimal?        @db.Decimal(10, 7)
+  gpsLongitude    Decimal?        @db.Decimal(10, 7)
+  gpsAccuracy     String?         // ex: "precise", "approximate"
   language        Language        @default(FR)
   status          AccountStatus   @default(ACTIVE)
   kycVerified     Boolean         @default(false)
@@ -326,6 +331,8 @@ model Client {
   tontineMemberships TontineMember[]
   savingsGoals    SavingsGoal[]
   paymentRequests PaymentRequest[]
+  solidarityMemberships SolidarityGroupMember[]
+  amlAlerts       AmlAlert[]
 
   @@map("clients")
 }
@@ -366,6 +373,8 @@ model AccountProduct {
   maintenanceFrequency String? // MONTHLY, QUARTERLY, YEARLY
   lockDurationMonths  Int      @default(0)
   earlyWithdrawalPenalty Decimal @default(0) @db.Decimal(5, 2)
+  maxWithdrawalPerDay    Decimal? @db.Decimal(15, 0)  // plafond retrait journalier
+  maxWithdrawalPerTransaction Decimal? @db.Decimal(15, 0) // plafond par operation
   isActive            Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
@@ -497,6 +506,7 @@ model Credit {
   restructuredAt    DateTime?
   scoringTotal      Int?
   scoringDetails    Json?
+  solidarityGroupId String?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
@@ -512,14 +522,24 @@ model Credit {
 }
 
 model Guarantee {
-  id          String        @id @default(uuid())
-  creditId    String
-  credit      Credit        @relation(fields: [creditId], references: [id], onDelete: Cascade)
-  type        GuaranteeType
-  description String
-  value       Decimal       @db.Decimal(15, 0)
-  documentUrl String?
-  createdAt   DateTime      @default(now())
+  id                String        @id @default(uuid())
+  creditId          String
+  credit            Credit        @relation(fields: [creditId], references: [id], onDelete: Cascade)
+  type              GuaranteeType
+  description       String
+  value             Decimal       @db.Decimal(15, 0)
+  documentUrl       String?
+  // Champs structures selon type
+  propertyAddress   String?       // Adresse du bien (hypotheque/nantissement)
+  propertyTitle     String?       // Titre foncier / Reference bien
+  registrationRef   String?       // Reference enregistrement greffe
+  guarantorName     String?       // Nom du garant (caution personnelle/solidaire)
+  guarantorPhone    String?       // Telephone garant
+  guarantorRelation String?       // Lien avec emprunteur
+  expiryDate        DateTime?     // Date expiration garantie
+  status            String        @default("ACTIVE") // ACTIVE, RELEASED, EXECUTED
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   @@map("guarantees")
 }
@@ -887,6 +907,43 @@ model FeeConfig {
 
   @@unique([transactionType, channel])
   @@map("fee_configs")
+}
+
+// ==================== GROUPES SOLIDAIRES ====================
+
+model SolidarityGroup {
+  id              String   @id @default(uuid())
+  name            String
+  code            String   @unique
+  description     String?
+  agencyId        String
+  agency          Agency   @relation(fields: [agencyId], references: [id])
+  presidentId     String
+  treasurerId     String?
+  maxMembers      Int      @default(10)
+  minMembers      Int      @default(3)
+  status          String   @default("ACTIVE") // ACTIVE, SUSPENDED, DISSOLVED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  members         SolidarityGroupMember[]
+
+  @@map("solidarity_groups")
+}
+
+model SolidarityGroupMember {
+  id              String   @id @default(uuid())
+  groupId         String
+  group           SolidarityGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  clientId        String
+  client          Client   @relation(fields: [clientId], references: [id])
+  role            String   @default("MEMBER") // PRESIDENT, TREASURER, MEMBER
+  joinedAt        DateTime @default(now())
+  leftAt          DateTime?
+  isActive        Boolean  @default(true)
+
+  @@unique([groupId, clientId])
+  @@map("solidarity_group_members")
 }
 
 // ==================== ENTREPRISES & SALAIRES ====================
@@ -1271,4 +1328,45 @@ model BillPayment {
   @@index([status])
   @@index([createdAt])
   @@map("bill_payments")
+}
+
+// ==================== LAB/FT (Anti-blanchiment) ====================
+
+enum AmlAlertStatus {
+  OPEN
+  INVESTIGATING
+  ESCALATED
+  CLOSED_FALSE_POSITIVE
+  CLOSED_CONFIRMED
+  REPORTED
+}
+
+model AmlAlert {
+  id              String         @id @default(uuid())
+  reference       String         @unique
+  clientId        String?
+  client          Client?        @relation(fields: [clientId], references: [id])
+  transactionId   String?
+  accountId       String?
+  alertType       String         // SEUIL_DECLARATION, FRACTIONNEMENT, PEP, PAYS_RISQUE, CASH_SUSPECT, COMPORTEMENT_INHABITUEL
+  riskLevel       String         @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  title           String
+  description     String         @db.Text
+  amount          Decimal?       @db.Decimal(15, 0)
+  status          AmlAlertStatus @default(OPEN)
+  assignedToId    String?
+  assignedTo      User?          @relation("AmlAlertAssignee", fields: [assignedToId], references: [id])
+  investigationNotes String?     @db.Text
+  resolution      String?
+  reportedToAuthority Boolean    @default(false)
+  reportDate      DateTime?
+  createdById     String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([clientId])
+  @@index([status])
+  @@index([riskLevel])
+  @@index([createdAt])
+  @@map("aml_alerts")
 }

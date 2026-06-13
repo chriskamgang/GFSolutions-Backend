@@ -1228,4 +1228,85 @@ export class CreditsService {
       contentieux,
     };
   }
+
+  // ==================== GARANTIES ====================
+
+  async getGuarantees(creditId: string) {
+    return this.prisma.guarantee.findMany({
+      where: { creditId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async addGuarantee(creditId: string, dto: {
+    type: string;
+    description: string;
+    value: number;
+    documentUrl?: string;
+    propertyAddress?: string;
+    propertyTitle?: string;
+    registrationRef?: string;
+    guarantorName?: string;
+    guarantorPhone?: string;
+    guarantorRelation?: string;
+    expiryDate?: string;
+  }, userId: string) {
+    const credit = await this.prisma.credit.findUnique({ where: { id: creditId } });
+    if (!credit) throw new NotFoundException('Credit non trouve');
+
+    const guarantee = await this.prisma.guarantee.create({
+      data: {
+        creditId,
+        type: dto.type as any,
+        description: dto.description,
+        value: dto.value,
+        documentUrl: dto.documentUrl,
+        propertyAddress: dto.propertyAddress,
+        propertyTitle: dto.propertyTitle,
+        registrationRef: dto.registrationRef,
+        guarantorName: dto.guarantorName,
+        guarantorPhone: dto.guarantorPhone,
+        guarantorRelation: dto.guarantorRelation,
+        expiryDate: dto.expiryDate ? new Date(dto.expiryDate) : undefined,
+      },
+    });
+
+    this.auditService.log({
+      userId, action: 'CREATE', module: 'CREDITS',
+      entityId: guarantee.id, entityType: 'Guarantee',
+      details: `Garantie ${dto.type} ajoutee au credit ${credit.creditNumber}: ${dto.value} FCFA`,
+    }).catch(() => {});
+
+    return guarantee;
+  }
+
+  async updateGuarantee(guaranteeId: string, dto: any, userId: string) {
+    const guarantee = await this.prisma.guarantee.findUnique({ where: { id: guaranteeId } });
+    if (!guarantee) throw new NotFoundException('Garantie non trouvee');
+
+    if (dto.expiryDate) dto.expiryDate = new Date(dto.expiryDate);
+
+    return this.prisma.guarantee.update({
+      where: { id: guaranteeId },
+      data: dto,
+    });
+  }
+
+  async releaseGuarantee(guaranteeId: string, userId: string) {
+    const guarantee = await this.prisma.guarantee.findUnique({ where: { id: guaranteeId } });
+    if (!guarantee) throw new NotFoundException('Garantie non trouvee');
+
+    const updated = await this.prisma.guarantee.update({
+      where: { id: guaranteeId },
+      data: { status: 'RELEASED' },
+    });
+
+    this.auditService.log({
+      userId, action: 'UPDATE', module: 'CREDITS',
+      entityId: guaranteeId, entityType: 'Guarantee',
+      details: `Garantie liberee`,
+    }).catch(() => {});
+
+    return updated;
+  }
 }

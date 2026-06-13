@@ -11,6 +11,7 @@ import { AuditService } from '../audit/audit.service';
 import { SmsService } from '../sms/sms.service';
 import { DepositDto, WithdrawalDto, TransferDto, ExternalTransferDto, ApproveExternalTransferDto } from './dto/transaction.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AmlService } from '../aml/aml.service';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
@@ -24,6 +25,7 @@ export class TransactionsService {
     private auditService: AuditService,
     private smsService: SmsService,
     private notificationsService: NotificationsService,
+    private amlService: AmlService,
   ) {
     this.taxRate = parseFloat(
       this.configService.get<string>('TAX_RATE', '19.25'),
@@ -399,6 +401,14 @@ export class TransactionsService {
       console.error('[SMS]', e.message),
     );
 
+    // Analyse LAB/FT
+    const toAccount = await this.prisma.account.findUnique({ where: { id: dto.toAccountId }, select: { clientId: true } });
+    if (toAccount) {
+      this.amlService.analyzeTransaction(result.id, dto.amount, toAccount.clientId, 'DEPOSIT').catch((e) =>
+        console.error('[AML]', e.message),
+      );
+    }
+
     return result;
   }
 
@@ -412,6 +422,33 @@ export class TransactionsService {
 
     if (account.status !== 'ACTIVE') {
       throw new BadRequestException('Ce compte n\'est pas actif');
+    }
+
+    // Verifier plafonds retrait (produit de compte)
+    if (account.productId) {
+      const product = await this.prisma.accountProduct.findUnique({ where: { id: account.productId } });
+      if (product) {
+        if (product.maxWithdrawalPerTransaction && new Prisma.Decimal(dto.amount).gt(product.maxWithdrawalPerTransaction)) {
+          throw new BadRequestException(`Montant depasse le plafond par operation (${product.maxWithdrawalPerTransaction} FCFA)`);
+        }
+        if (product.maxWithdrawalPerDay) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const todayWithdrawals = await this.prisma.transaction.aggregate({
+            where: {
+              fromAccountId: dto.fromAccountId,
+              type: 'WITHDRAWAL',
+              status: 'COMPLETED',
+              createdAt: { gte: today },
+            },
+            _sum: { amount: true },
+          });
+          const totalToday = Number(todayWithdrawals._sum.amount || 0) + dto.amount;
+          if (new Prisma.Decimal(totalToday).gt(product.maxWithdrawalPerDay)) {
+            throw new BadRequestException(`Plafond retrait journalier depasse (${product.maxWithdrawalPerDay} FCFA). Deja retire aujourd'hui: ${Number(todayWithdrawals._sum.amount || 0)} FCFA`);
+          }
+        }
+      }
     }
 
     const channel = dto.mobileMoneyProvider || 'CASH';
@@ -475,6 +512,14 @@ export class TransactionsService {
     this.sendTransactionSms(dto.fromAccountId, 'WITHDRAWAL', dto.amount).catch((e) =>
       console.error('[SMS]', e.message),
     );
+
+    // Analyse LAB/FT
+    const fromAccount = await this.prisma.account.findUnique({ where: { id: dto.fromAccountId }, select: { clientId: true } });
+    if (fromAccount) {
+      this.amlService.analyzeTransaction(result.id, dto.amount, fromAccount.clientId, 'WITHDRAWAL').catch((e) =>
+        console.error('[AML]', e.message),
+      );
+    }
 
     return result;
   }

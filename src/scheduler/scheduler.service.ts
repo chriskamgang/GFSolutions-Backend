@@ -10,6 +10,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { SmsService } from '../sms/sms.service';
 import { CreditsService } from '../credits/credits.service';
 import { PaymentGatewayService } from '../payment-gateway/payment-gateway.service';
+import { PawaPayService } from '../pawapay/pawapay.service';
 
 @Injectable()
 export class SchedulerService {
@@ -23,6 +24,7 @@ export class SchedulerService {
     private creditsService: CreditsService,
     private configService: ConfigService,
     private paymentGatewayService: PaymentGatewayService,
+    private kpayService: PawaPayService,
   ) {}
 
   // ==================== a) CALCUL INTERETS MENSUELS (par quinzaine) ====================
@@ -600,7 +602,31 @@ export class SchedulerService {
     }
   }
 
-  // ==================== i) SAUVEGARDE AUTOMATIQUE QUOTIDIENNE ====================
+  // ==================== i) POLLING STATUTS KPAY (MOBILE MONEY) ====================
+  // Toutes les 30 secondes — verifie les transactions PENDING aupres de l'API KPay
+
+  @Cron('*/30 * * * * *')
+  async pollKPayTransactionStatuses() {
+    try {
+      await this.kpayService.pollPendingTransactions();
+    } catch (error) {
+      this.logger.error(`Erreur polling KPay: ${error.message}`);
+    }
+  }
+
+  // ==================== j) EXPIRATION TRANSACTIONS KPAY ====================
+  // Toutes les heures — expire les transactions PENDING de plus de 24h
+
+  @Cron('0 0 * * * *')
+  async expireKPayTransactions() {
+    try {
+      await this.kpayService.expireOldPendingTransactions();
+    } catch (error) {
+      this.logger.error(`Erreur expiration KPay: ${error.message}`);
+    }
+  }
+
+  // ==================== k) SAUVEGARDE AUTOMATIQUE QUOTIDIENNE ====================
   // Tous les jours a 3h du matin
 
   @Cron('0 3 * * *')

@@ -114,7 +114,18 @@ export class PaymentGatewayService {
       this.prisma.merchant.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    // Compter les clients onboardés par marchand via partnerSource
+    const enriched = await Promise.all(
+      data.map(async (m) => {
+        const partnerSource = m.name.toUpperCase().replace(/\s+/g, '_');
+        const onboardedClients = await this.prisma.client.count({
+          where: { partnerSource },
+        });
+        return { ...m, onboardedClients };
+      }),
+    );
+
+    return { data: enriched, total, page, limit };
   }
 
   async getMerchantById(id: string) {
@@ -127,7 +138,9 @@ export class PaymentGatewayService {
       },
     });
     if (!merchant) throw new NotFoundException('Marchand introuvable');
-    return merchant;
+    const partnerSource = merchant.name.toUpperCase().replace(/\s+/g, '_');
+    const onboardedClients = await this.prisma.client.count({ where: { partnerSource } });
+    return { ...merchant, onboardedClients };
   }
 
   async updateMerchantStatus(id: string, status: 'ACTIVE' | 'SUSPENDED') {
@@ -785,7 +798,7 @@ export class PaymentGatewayService {
   // ==================== STATS ADMIN ====================
 
   async getGatewayStats() {
-    const [totalMerchants, activeMerchants, totalPayments, completedPayments] = await Promise.all([
+    const [totalMerchants, activeMerchants, totalPayments, completedPayments, totalOnboardedClients] = await Promise.all([
       this.prisma.merchant.count(),
       this.prisma.merchant.count({ where: { status: 'ACTIVE' } }),
       this.prisma.paymentRequest.count(),
@@ -794,6 +807,7 @@ export class PaymentGatewayService {
         _sum: { amount: true },
         _count: { id: true },
       }),
+      this.prisma.client.count({ where: { partnerSource: { not: null } } }),
     ]);
 
     return {
@@ -802,6 +816,7 @@ export class PaymentGatewayService {
       totalPayments,
       completedPayments: completedPayments._count.id,
       totalVolumeXAF: Number(completedPayments._sum.amount || 0),
+      totalOnboardedClients,
     };
   }
 }

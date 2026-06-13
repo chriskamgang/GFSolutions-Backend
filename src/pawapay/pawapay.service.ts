@@ -36,9 +36,11 @@ const PROVIDER_TO_PRISMA: Record<string, string> = {
 export class PawaPayService {
   private readonly logger = new Logger('KPayService');
   private readonly baseUrl = 'https://admin.kpay.site';
-  private apiKey: string;
-  private secretKey: string;
-  private callbackUrl: string;
+  private mode: 'live' | 'test' = 'test';
+  private testApiKey = '';
+  private testSecretKey = '';
+  private liveApiKey = '';
+  private liveSecretKey = '';
   private readonly currency = 'XAF';
   private enabledProviders: string[] = [];
 
@@ -49,11 +51,22 @@ export class PawaPayService {
     private whatsappService: WhatsappService,
     private accountingService: AccountingService,
   ) {
-    this.apiKey = this.configService.get<string>('KPAY_API_KEY', '');
-    this.secretKey = this.configService.get<string>('KPAY_SECRET_KEY', '');
-    this.callbackUrl = this.configService.get<string>('KPAY_CALLBACK_URL', '');
     // Charger depuis la DB au demarrage
     this.loadConfigFromDb().catch(() => {});
+  }
+
+  /** Retourne les cles actives selon le mode (live ou test) */
+  private get apiKey(): string {
+    return this.mode === 'live' ? this.liveApiKey : this.testApiKey;
+  }
+
+  private get secretKey(): string {
+    return this.mode === 'live' ? this.liveSecretKey : this.testSecretKey;
+  }
+
+  /** Indique si on est en mode test */
+  get isTestMode(): boolean {
+    return this.mode !== 'live';
   }
 
   async loadConfigFromDb() {
@@ -61,11 +74,21 @@ export class PawaPayService {
       const settings = await this.prisma.setting.findMany({ where: { category: 'kpay' } });
       const map: Record<string, string> = {};
       for (const s of settings) map[s.key] = s.value;
-      if (map['kpay_api_key']) this.apiKey = map['kpay_api_key'];
-      if (map['kpay_secret_key']) this.secretKey = map['kpay_secret_key'];
-      if (map['kpay_callback_url']) this.callbackUrl = map['kpay_callback_url'];
+
+      // Mode
+      this.mode = (map['kpay_mode'] === 'live') ? 'live' : 'test';
+
+      // Cles Test (retro-compatible avec ancien format kpay_api_key)
+      this.testApiKey = map['kpay_test_api_key'] || map['kpay_api_key'] || '';
+      this.testSecretKey = map['kpay_test_secret_key'] || map['kpay_secret_key'] || '';
+
+      // Cles Live
+      this.liveApiKey = map['kpay_live_api_key'] || '';
+      this.liveSecretKey = map['kpay_live_secret_key'] || '';
+
       try { this.enabledProviders = JSON.parse(map['kpay_enabled_providers'] || '[]'); } catch { this.enabledProviders = []; }
-      this.logger.log(`Config KPay chargee depuis la DB (apiKey: ${this.apiKey ? '***' + this.apiKey.slice(-8) : 'non configure'}, providers: ${this.enabledProviders.length})`);
+
+      this.logger.log(`Config KPay chargee — mode: ${this.mode.toUpperCase()}, apiKey: ${this.apiKey ? '***' + this.apiKey.slice(-8) : 'non configure'}, providers: ${this.enabledProviders.length}`);
     } catch (e) {
       this.logger.warn(`Impossible de charger la config KPay depuis la DB: ${e.message}`);
     }
@@ -135,6 +158,7 @@ export class PawaPayService {
         mobileMoneyRef: externalId,
         agencyId: params.agencyId,
         status: 'PENDING',
+        isTest: this.isTestMode,
         description: params.description || `Depot Mobile Money ${PROVIDER_DISPLAY[provider] || provider}`,
       },
     });
@@ -241,6 +265,7 @@ export class PawaPayService {
         mobileMoneyRef: externalId,
         agencyId: params.agencyId,
         status: 'PENDING',
+        isTest: this.isTestMode,
         description: params.description || `Retrait Mobile Money ${PROVIDER_DISPLAY[provider] || provider}`,
       },
     });
@@ -306,145 +331,215 @@ export class PawaPayService {
     }
   }
 
-  // ==================== WEBHOOK KPAY ====================
+  // ==================== POLLING JOB — VERIFICATION STATUTS TRANSACTIONS PENDING ====================
 
-  async handleWebhook(payload: any) {
-    this.logger.log(`[KPay] Webhook recu: ${JSON.stringify(payload)}`);
-
-    const { event, paymentId, status, externalId, amount, failureReason } = payload;
-
-    if (!paymentId && !externalId) return { received: true };
-
-    // Chercher la transaction par mobileMoneyRef (paymentId KPay ou externalId)
-    let transaction = await this.prisma.transaction.findFirst({
-      where: { mobileMoneyRef: paymentId },
+  /**
+   * Appelee par le SchedulerService toutes les 30 secondes.
+   * Recupere toutes les transactions PENDING liees a KPay et verifie leur statut via l'API.
+   */
+  async pollPendingTransactions() {
+    const pendingTxns = await this.prisma.transaction.findMany({
+      where: {
+        status: 'PENDING',
+        mobileMoneyRef: { not: null },
+        // Seulement les transactions Mobile Money (ont un mobileMoneyProvider)
+        mobileMoneyProvider: { not: null },
+        // Ne pas verifier les transactions de plus de 24h (expirées)
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
       include: {
         toAccount: { include: { client: true } },
         fromAccount: { include: { client: true } },
       },
     });
 
-    if (!transaction && externalId) {
-      transaction = await this.prisma.transaction.findFirst({
-        where: { mobileMoneyRef: externalId },
-        include: {
-          toAccount: { include: { client: true } },
-          fromAccount: { include: { client: true } },
-        },
-      });
-    }
+    if (pendingTxns.length === 0) return;
 
-    if (!transaction) {
-      this.logger.warn(`[KPay] Transaction non trouvee: paymentId=${paymentId}, externalId=${externalId}`);
-      return { received: true };
-    }
+    this.logger.log(`[KPay Poll] ${pendingTxns.length} transaction(s) PENDING a verifier`);
 
-    if (transaction.status !== 'PENDING') return { received: true }; // Deja traite
+    for (const transaction of pendingTxns) {
+      try {
+        await this.checkAndUpdateTransactionStatus(transaction);
+      } catch (err) {
+        this.logger.warn(`[KPay Poll] Erreur verification ${transaction.reference}: ${err.message}`);
+      }
+    }
+  }
+
+  /**
+   * Verifie le statut d'une transaction aupres de KPay et met a jour en consequence.
+   */
+  private async checkAndUpdateTransactionStatus(transaction: any) {
+    if (!this.apiKey || !transaction.mobileMoneyRef) return;
 
     const isDeposit = transaction.type === 'DEPOSIT';
+    const paymentId = transaction.mobileMoneyRef;
 
-    if (status === 'COMPLETED') {
-      if (isDeposit) {
-        // Crediter le compte
-        await this.prisma.account.update({
-          where: { id: transaction.toAccountId! },
-          data: { balance: { increment: Number(amount || transaction.amount) } },
-        });
+    // Appel API KPay pour verifier le statut
+    let data: any;
+    try {
+      const url = isDeposit
+        ? `${this.baseUrl}/api/v1/payments/${paymentId}`
+        : `${this.baseUrl}/api/v1/payments/withdraw/${paymentId}`;
 
-        await this.prisma.transaction.update({
-          where: { id: transaction.id },
-          data: { status: 'COMPLETED' },
-        });
-
-        // Ecriture comptable
-        try {
-          await this.accountingService.recordDeposit(
-            transaction.agencyId,
-            Number(transaction.amount),
-            Number(transaction.fees),
-            Number(transaction.tax),
-            transaction.reference,
-            true,
-          );
-        } catch (e) {
-          this.logger.warn(`[COMPTA] Echec ecriture depot MM: ${e.message}`);
-        }
-
-        // Alertes SMS + WhatsApp
-        if (transaction.toAccount?.client?.phone) {
-          const balance = await this.prisma.account.findUnique({
-            where: { id: transaction.toAccountId! },
-            select: { balance: true, accountNumber: true },
-          });
-          const phone = transaction.toAccount.client.phone;
-          const accNum = balance?.accountNumber || '';
-          const amt = Number(transaction.amount);
-          const bal = Number(balance?.balance || 0);
-
-          this.smsService.sendDepositAlert(phone, accNum, amt, bal).catch(() => {});
-          this.whatsappService.sendDepositAlert(phone, accNum, amt, bal).catch(() => {});
-        }
-
-        this.logger.log(`[KPay] Depot COMPLETE: ${transaction.reference} — ${transaction.amount} XAF`);
-      } else {
-        // Retrait confirme
-        await this.prisma.transaction.update({
-          where: { id: transaction.id },
-          data: { status: 'COMPLETED' },
-        });
-
-        try {
-          await this.accountingService.recordWithdrawal(
-            transaction.agencyId,
-            Number(transaction.amount),
-            Number(transaction.fees),
-            Number(transaction.tax),
-            transaction.reference,
-            true,
-          );
-        } catch (e) {
-          this.logger.warn(`[COMPTA] Echec ecriture retrait MM: ${e.message}`);
-        }
-
-        if (transaction.fromAccount?.client?.phone) {
-          const account = await this.prisma.account.findUnique({
-            where: { id: transaction.fromAccountId! },
-            select: { balance: true, accountNumber: true },
-          });
-          const phone = transaction.fromAccount.client.phone;
-          const accNum = account?.accountNumber || '';
-          const amt = Number(transaction.amount);
-          const bal = Number(account?.balance || 0);
-
-          this.smsService.sendWithdrawalAlert(phone, accNum, amt, bal).catch(() => {});
-          this.whatsappService.sendWithdrawalAlert(phone, accNum, amt, bal).catch(() => {});
-        }
-
-        this.logger.log(`[KPay] Retrait COMPLETE: ${transaction.reference}`);
+      const res = await fetch(url, { headers: this.headers });
+      if (!res.ok) {
+        // Si 404, essayer avec l'autre endpoint (externalId vs paymentId)
+        if (res.status === 404) return;
+        return;
       }
-
-      return { received: true, status: 'COMPLETED', reference: transaction.reference };
+      data = await res.json();
+    } catch {
+      return; // Erreur reseau, on reessaie au prochain cycle
     }
 
-    if (status === 'FAILED' || status === 'CANCELLED') {
-      if (!isDeposit) {
-        // Reverser le debit pour les retraits echoues
-        await this.prisma.account.update({
-          where: { id: transaction.fromAccountId! },
-          data: { balance: { increment: Number(amount || transaction.amount) } },
-        });
-        this.logger.warn(`[KPay] Retrait ECHEC + remboursement: ${transaction.reference}`);
-      }
+    const status = data.status;
+    if (!status || status === 'PENDING' || status === 'INITIATED' || status === 'PROCESSING') {
+      return; // Pas encore de resolution, on reessaie plus tard
+    }
+
+    this.logger.log(`[KPay Poll] ${transaction.reference} → ${status}`);
+
+    if (status === 'COMPLETED' || status === 'SUCCESSFUL') {
+      await this.handleTransactionCompleted(transaction, isDeposit);
+    } else if (status === 'FAILED' || status === 'CANCELLED' || status === 'EXPIRED') {
+      await this.handleTransactionFailed(transaction, isDeposit, data.failureReason || data.reason || status);
+    }
+  }
+
+  private async handleTransactionCompleted(transaction: any, isDeposit: boolean) {
+    if (isDeposit) {
+      // Crediter le compte
+      await this.prisma.account.update({
+        where: { id: transaction.toAccountId! },
+        data: { balance: { increment: Number(transaction.amount) } },
+      });
 
       await this.prisma.transaction.update({
         where: { id: transaction.id },
-        data: { status: 'FAILED', description: `Echec: ${(failureReason || 'INCONNU').slice(0, 180)}` },
+        data: { status: 'COMPLETED' },
       });
 
-      this.logger.warn(`[KPay] ${isDeposit ? 'Depot' : 'Retrait'} ECHEC: ${transaction.reference}`);
+      // Ecriture comptable
+      try {
+        await this.accountingService.recordDeposit(
+          transaction.agencyId,
+          Number(transaction.amount),
+          Number(transaction.fees),
+          Number(transaction.tax),
+          transaction.reference,
+          true,
+        );
+      } catch (e) {
+        this.logger.warn(`[COMPTA] Echec ecriture depot MM: ${e.message}`);
+      }
+
+      // Alertes SMS + WhatsApp
+      if (transaction.toAccount?.client?.phone) {
+        const balance = await this.prisma.account.findUnique({
+          where: { id: transaction.toAccountId! },
+          select: { balance: true, accountNumber: true },
+        });
+        const phone = transaction.toAccount.client.phone;
+        const accNum = balance?.accountNumber || '';
+        const amt = Number(transaction.amount);
+        const bal = Number(balance?.balance || 0);
+
+        this.smsService.sendDepositAlert(phone, accNum, amt, bal).catch(() => {});
+        this.whatsappService.sendDepositAlert(phone, accNum, amt, bal).catch(() => {});
+      }
+
+      this.logger.log(`[KPay Poll] Depot COMPLETE: ${transaction.reference} — ${transaction.amount} XAF`);
+    } else {
+      // Retrait confirme (le debit a deja ete fait a l'initiation)
+      await this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { status: 'COMPLETED' },
+      });
+
+      try {
+        await this.accountingService.recordWithdrawal(
+          transaction.agencyId,
+          Number(transaction.amount),
+          Number(transaction.fees),
+          Number(transaction.tax),
+          transaction.reference,
+          true,
+        );
+      } catch (e) {
+        this.logger.warn(`[COMPTA] Echec ecriture retrait MM: ${e.message}`);
+      }
+
+      if (transaction.fromAccount?.client?.phone) {
+        const account = await this.prisma.account.findUnique({
+          where: { id: transaction.fromAccountId! },
+          select: { balance: true, accountNumber: true },
+        });
+        const phone = transaction.fromAccount.client.phone;
+        const accNum = account?.accountNumber || '';
+        const amt = Number(transaction.amount);
+        const bal = Number(account?.balance || 0);
+
+        this.smsService.sendWithdrawalAlert(phone, accNum, amt, bal).catch(() => {});
+        this.whatsappService.sendWithdrawalAlert(phone, accNum, amt, bal).catch(() => {});
+      }
+
+      this.logger.log(`[KPay Poll] Retrait COMPLETE: ${transaction.reference}`);
+    }
+  }
+
+  private async handleTransactionFailed(transaction: any, isDeposit: boolean, reason: string) {
+    if (!isDeposit) {
+      // Reverser le debit pour les retraits echoues
+      await this.prisma.account.update({
+        where: { id: transaction.fromAccountId! },
+        data: { balance: { increment: Number(transaction.amount) } },
+      });
+      this.logger.warn(`[KPay Poll] Retrait ECHEC + remboursement: ${transaction.reference}`);
     }
 
-    return { received: true };
+    await this.prisma.transaction.update({
+      where: { id: transaction.id },
+      data: { status: 'FAILED', description: `Echec: ${(reason || 'INCONNU').slice(0, 180)}` },
+    });
+
+    this.logger.warn(`[KPay Poll] ${isDeposit ? 'Depot' : 'Retrait'} ECHEC: ${transaction.reference} — ${reason}`);
+  }
+
+  /**
+   * Expire les transactions PENDING de plus de 24h
+   */
+  async expireOldPendingTransactions() {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const expired = await this.prisma.transaction.findMany({
+      where: {
+        status: 'PENDING',
+        mobileMoneyProvider: { not: null },
+        createdAt: { lt: cutoff },
+      },
+    });
+
+    for (const txn of expired) {
+      // Pour les retraits expirés, reverser le debit
+      if (txn.type === 'WITHDRAWAL' && txn.fromAccountId) {
+        await this.prisma.account.update({
+          where: { id: txn.fromAccountId },
+          data: { balance: { increment: Number(txn.amount) } },
+        });
+      }
+
+      await this.prisma.transaction.update({
+        where: { id: txn.id },
+        data: { status: 'FAILED', description: 'Expire: pas de confirmation dans les 24h' },
+      });
+
+      this.logger.warn(`[KPay Poll] Transaction expiree: ${txn.reference}`);
+    }
+
+    if (expired.length > 0) {
+      this.logger.log(`[KPay Poll] ${expired.length} transaction(s) expiree(s)`);
+    }
   }
 
   // ==================== STATUT ====================
