@@ -1230,6 +1230,12 @@ enum MerchantStatus {
   SUSPENDED
 }
 
+enum MerchantType {
+  PAYMENT    // Marchand qui recoit des paiements (ex: Merci E)
+  ONBOARDING // Partenaire qui inscrit des clients (ex: Estuaire Emploi)
+  BOTH       // Les deux
+}
+
 enum PaymentRequestStatus {
   PENDING
   COMPLETED
@@ -1254,6 +1260,7 @@ model Merchant {
   account       Account        @relation(fields: [accountId], references: [id])
   agencyId      String
   agency        Agency         @relation(fields: [agencyId], references: [id])
+  type          MerchantType   @default(PAYMENT)
   status        MerchantStatus @default(PENDING)
   commissionDepotPct   Decimal @default(0) @db.Decimal(5, 2) // % commission GFS sur les depots
   commissionRetraitPct Decimal @default(0) @db.Decimal(5, 2) // % commission GFS sur les retraits

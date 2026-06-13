@@ -47,6 +47,7 @@ export class PaymentGatewayService {
     phone?: string;
     website?: string;
     description?: string;
+    type?: string;
     webhookUrl?: string;
     returnUrl?: string;
     accountId: string;
@@ -76,6 +77,7 @@ export class PaymentGatewayService {
         returnUrl: dto.returnUrl,
         accountId: dto.accountId,
         agencyId: dto.agencyId,
+        type: (dto.type as any) || 'PAYMENT',
         commissionDepotPct: dto.commissionDepotPct ?? 0,
         commissionRetraitPct: dto.commissionRetraitPct ?? 0,
         apiKey,
@@ -154,6 +156,7 @@ export class PaymentGatewayService {
     phone?: string;
     website?: string;
     description?: string;
+    type?: string;
     webhookUrl?: string;
     returnUrl?: string;
     commissionDepotPct?: number;
@@ -161,7 +164,7 @@ export class PaymentGatewayService {
   }) {
     const merchant = await this.prisma.merchant.findUnique({ where: { id } });
     if (!merchant) throw new NotFoundException('Marchand introuvable');
-    return this.prisma.merchant.update({ where: { id }, data: dto });
+    return this.prisma.merchant.update({ where: { id }, data: dto as any });
   }
 
   async regenerateApiKeys(id: string) {
@@ -203,6 +206,7 @@ export class PaymentGatewayService {
 
     const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
     if (!merchant || merchant.status !== 'ACTIVE') throw new ForbiddenException('Marchand inactif');
+    if (merchant.type === 'ONBOARDING') throw new ForbiddenException('Ce marchand est de type ONBOARDING et ne peut pas creer de paiements. Contactez GFS pour passer en type PAYMENT ou BOTH.');
 
     const paymentRef = generatePaymentRef();
     const expiresAt = new Date(Date.now() + (dto.expiresInMinutes || 30) * 60 * 1000);
@@ -560,6 +564,7 @@ export class PaymentGatewayService {
   }) {
     const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
     if (!merchant || merchant.status !== 'ACTIVE') throw new ForbiddenException('Marchand inactif');
+    if (merchant.type === 'PAYMENT') throw new ForbiddenException('Ce marchand est de type PAYMENT et ne peut pas onboarder des clients. Contactez GFS pour passer en type ONBOARDING ou BOTH.');
 
     // Nettoyer le telephone
     let phone = dto.phone.replace(/[\s\-\.]/g, '');
@@ -585,18 +590,7 @@ export class PaymentGatewayService {
     });
     if (!product) throw new BadRequestException('Aucun produit de compte courant actif configure');
 
-    const ACCOUNT_CREATION_FEE = 1000; // frais de creation debites du marchand
-    const minDeposit = Number(product.minOpeningDeposit) || 0;
-    const openingFees = Number(product.openingFees) || 0;
-    const totalNeeded = ACCOUNT_CREATION_FEE + minDeposit + openingFees;
-
-    // Verifier que le marchand a assez de solde
-    const merchantAccount = await this.prisma.account.findUnique({ where: { id: merchant.accountId } });
-    if (!merchantAccount || Number(merchantAccount.balance) < totalNeeded) {
-      throw new BadRequestException(
-        `Solde marchand insuffisant. Requis: ${totalNeeded.toLocaleString('fr-FR')} FCFA (frais creation: ${ACCOUNT_CREATION_FEE}, depot min: ${minDeposit}, frais ouverture: ${openingFees})`
-      );
-    }
+    // Onboarding partenaire = gratuit (pas de frais, pas de depot minimum)
 
     // Generer identifiants
     const clientNumber = this.generateClientNumber();
@@ -642,30 +636,7 @@ export class PaymentGatewayService {
           agencyId: merchant.agencyId,
           productId: product.id,
           type: 'CURRENT',
-          balance: minDeposit,
-        },
-      });
-
-      // 3. Debiter le marchand (frais creation + depot minimum + frais ouverture)
-      await tx.account.update({
-        where: { id: merchant.accountId },
-        data: { balance: { decrement: totalNeeded } },
-      });
-
-      // 4. Creer la transaction
-      const reference = `ONBOARD-${Date.now()}-${Math.floor(Math.random() * 9999)}`;
-      await tx.transaction.create({
-        data: {
-          reference,
-          type: 'TRANSFER',
-          amount: totalNeeded,
-          fees: openingFees + ACCOUNT_CREATION_FEE,
-          tax: 0,
-          fromAccountId: merchant.accountId,
-          toAccountId: account.id,
-          agencyId: merchant.agencyId,
-          status: 'COMPLETED',
-          description: `Ouverture compte partenaire ${merchant.name} — Client: ${dto.firstName} ${dto.lastName}`,
+          balance: 0,
         },
       });
 
@@ -711,7 +682,7 @@ export class PaymentGatewayService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         partnerUserId: dto.partnerUserId,
-        amountDebited: ACCOUNT_CREATION_FEE + minDeposit + openingFees,
+        amountDebited: 0,
         timestamp: new Date().toISOString(),
       };
       const hmac = crypto.createHmac('sha256', merchant.apiKey).update(JSON.stringify(payload)).digest('hex');
@@ -735,7 +706,7 @@ export class PaymentGatewayService {
       clientNumber,
       accountNumber: result.accountNumber,
       phone,
-      amountDebited: ACCOUNT_CREATION_FEE + minDeposit + openingFees,
+      amountDebited: 0,
       message: `Compte GFSolutions cree pour ${clientName}. Identifiants envoyes par WhatsApp et SMS.`,
     };
   }
