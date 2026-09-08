@@ -129,4 +129,93 @@ export class ReportsController {
     res.setHeader('Content-Disposition', `attachment; filename=Rapport_COBAC_${date}.xlsx`);
     res.send(buffer);
   }
+
+  // ==================== RAPPORTS DGI ====================
+
+  @Get('fees')
+  @ApiOperation({ summary: 'Rapport des frais percus (depot, retrait, transfert) avec details et totaux' })
+  @Permissions('REPORTS:READ')
+  @ApiQuery({ name: 'startDate', required: false, description: 'YYYY-MM-DD' })
+  @ApiQuery({ name: 'endDate', required: false, description: 'YYYY-MM-DD' })
+  getFeesReport(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.reportsService.getFeesReport(startDate, endDate);
+  }
+
+  @Get('dgi/tva')
+  @Permissions('REPORTS:READ')
+  @ApiOperation({ summary: 'Declaration TVA mensuelle (19,25%)' })
+  @ApiQuery({ name: 'year', required: false })
+  @ApiQuery({ name: 'month', required: false })
+  getDgiTva(
+    @Query('year') year?: string,
+    @Query('month') month?: string,
+  ) {
+    const now = new Date();
+    return this.reportsService.getDgiTva(
+      year ? +year : now.getFullYear(),
+      month ? +month : now.getMonth() + 1,
+    );
+  }
+
+  @Get('dgi/dsf')
+  @Permissions('REPORTS:READ')
+  @ApiOperation({ summary: 'Declaration Statistique et Fiscale annuelle (DSF)' })
+  @ApiQuery({ name: 'year', required: false })
+  getDgiDsf(@Query('year') year?: string) {
+    return this.reportsService.getDgiDsf(year ? +year : new Date().getFullYear());
+  }
+
+  @Get('dgi/ircm')
+  @Permissions('REPORTS:READ')
+  @ApiOperation({ summary: 'Retenues IRCM sur interets verses aux deposants (16,5%)' })
+  @ApiQuery({ name: 'year', required: false })
+  @ApiQuery({ name: 'month', required: false, description: 'Si omis, rapport annuel' })
+  getDgiIrcm(
+    @Query('year') year?: string,
+    @Query('month') month?: string,
+  ) {
+    const now = new Date();
+    return this.reportsService.getDgiIrcm(
+      year ? +year : now.getFullYear(),
+      month ? +month : undefined,
+    );
+  }
+
+  @Get('dgi/is')
+  @Permissions('REPORTS:READ')
+  @ApiOperation({ summary: 'Calcul Impot sur les Societes (IS) - 33% ou minimum de perception 2,2%' })
+  @ApiQuery({ name: 'year', required: false })
+  getDgiIs(@Query('year') year?: string) {
+    return this.reportsService.getDgiIs(year ? +year : new Date().getFullYear());
+  }
+
+  @Get('dgi/summary')
+  @Permissions('REPORTS:READ')
+  @ApiOperation({ summary: 'Tableau de bord fiscal annuel (TVA + IS + IRCM + calendrier)' })
+  @ApiQuery({ name: 'year', required: false })
+  getDgiSummary(@Query('year') year?: string) {
+    return this.reportsService.getDgiSummary(year ? +year : new Date().getFullYear());
+  }
+
+  @Get('dgi/export')
+  @Permissions('REPORTS:READ')
+  @ApiOperation({ summary: 'Export Excel des rapports DGI (TVA, DSF, IRCM, IS ou ALL)' })
+  @ApiQuery({ name: 'year', required: false })
+  @ApiQuery({ name: 'type', required: false, description: 'TVA | DSF | IRCM | IS | ALL (defaut: ALL)' })
+  async getDgiExcel(
+    @Query('year') year?: string,
+    @Query('type') type?: string,
+    @Res() res?: any,
+  ) {
+    const y = year ? +year : new Date().getFullYear();
+    const t = type || 'ALL';
+    const buffer = await this.reportsService.generateDgiExcel(y, t);
+    const date = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename=Rapport_DGI_${t}_${y}_${date}.xlsx`);
+    res.send(buffer);
+  }
 }

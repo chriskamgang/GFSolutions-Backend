@@ -101,4 +101,56 @@ export class CompaniesController {
   getSalaryHistory(@Param('id') id: string) {
     return this.companiesService.getSalaryHistory(id);
   }
+
+  // === Nouveau systeme : Client PM comme employeur ===
+
+  @Get('employer/:clientId/employees')
+  @Permissions('COMPANIES:READ')
+  @ApiOperation({ summary: 'Employes d\'une personne morale (client PM)' })
+  getEmployerEmployees(@Param('clientId') clientId: string) {
+    return this.companiesService.getEmployerEmployees(clientId);
+  }
+
+  @Post('employer/:clientId/employees')
+  @Permissions('COMPANIES:CREATE')
+  @ApiOperation({ summary: 'Ajouter un employe a une personne morale (client PM)' })
+  addEmployerEmployee(
+    @Param('clientId') clientId: string,
+    @Body() body: { clientId?: string; phone?: string },
+  ) {
+    return this.companiesService.addEmployerEmployee(clientId, body);
+  }
+
+  @Delete('employer/:clientId/employees/:employeeId')
+  @Permissions('COMPANIES:CREATE')
+  @ApiOperation({ summary: 'Retirer un employe d\'une personne morale' })
+  removeEmployerEmployee(
+    @Param('clientId') clientId: string,
+    @Param('employeeId') employeeId: string,
+  ) {
+    return this.companiesService.removeEmployerEmployee(clientId, employeeId);
+  }
+
+  @Post('employer/:clientId/salary-batch')
+  @Permissions('COMPANIES:CREATE', 'TRANSACTIONS:CREATE')
+  @ApiOperation({ summary: 'Virement de salaires pour une personne morale' })
+  processEmployerSalaryBatch(
+    @Param('clientId') clientId: string,
+    @Body()
+    body: {
+      payments: { employeeName: string; employeePhone: string; amount: number }[];
+    },
+  ) {
+    return this.companiesService.processEmployerSalaryBatch({
+      employerClientId: clientId,
+      payments: body.payments,
+    });
+  }
+
+  @Get('employer/:clientId/salary-history')
+  @Permissions('COMPANIES:READ')
+  @ApiOperation({ summary: 'Historique virements salaires d\'une personne morale' })
+  getEmployerSalaryHistory(@Param('clientId') clientId: string) {
+    return this.companiesService.getEmployerSalaryHistory(clientId);
+  }
 }

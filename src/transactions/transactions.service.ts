@@ -77,16 +77,89 @@ export class TransactionsService {
     });
   }
 
-  private async calculateFees(amount: number, transactionType: string, channel: string = 'CASH'): Promise<{ fees: number; tax: number }> {
-    // Try to find specific config for type+channel
-    let config = await this.prisma.feeConfig.findFirst({
-      where: { transactionType, channel, isActive: true },
+  // Comptes exemptes de frais (depot & retrait)
+  private static readonly FEE_EXEMPT_ACCOUNTS = new Set([
+    '01100000127', // ORANGE MONEY BON
+  ]);
+
+  private async calculateFees(amount: number, transactionType: string, channel: string = 'CASH', accountType: string = 'ALL', accountNumber?: string, accountId?: string): Promise<{ fees: number; tax: number }> {
+    // Verifier si le compte est exempte de frais
+    if (accountNumber && TransactionsService.FEE_EXEMPT_ACCOUNTS.has(accountNumber)) {
+      return { fees: 0, tax: 0 };
+    }
+
+    // Compte SCOLARITE : 0 frais sur tous les depots et retraits (seuls frais d'entretien preleves via scheduler)
+    if (accountType === 'SCOLARITE') {
+      return { fees: 0, tax: 0 };
+    }
+
+    // Compte SALARY : forfait 1000 FCFA au 1er depot du mois, 0 frais pour tout le reste
+    if (accountType === 'SALARY') {
+      // Retraits et transferts : toujours gratuit
+      if (transactionType !== 'DEPOSIT') {
+        return { fees: 0, tax: 0 };
+      }
+      // Depot : verifier s'il y a deja eu un depot ce mois-ci
+      if (accountId) {
+        const now = new Date();
+        const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const depositThisMonth = await this.prisma.transaction.findFirst({
+          where: {
+            toAccountId: accountId,
+            type: 'DEPOSIT',
+            status: 'COMPLETED',
+            createdAt: { gte: firstOfMonth },
+          },
+        });
+        if (depositThisMonth) {
+          // Deja eu un depot ce mois → 0 frais
+          return { fees: 0, tax: 0 };
+        }
+      }
+      // 1er depot du mois → forfait 1000 FCFA, pas de TVA
+      return { fees: 1000, tax: 0 };
+    }
+
+    // Chercher config specifique : type de transaction + canal + type de compte + tranche de montant
+    const allConfigs = await this.prisma.feeConfig.findMany({
+      where: { transactionType, isActive: true },
+      orderBy: { minAmount: 'asc' },
     });
-    // Fallback to type+ALL
+
+    // Filtrer par canal, type de compte et tranche de montant
+    let config = allConfigs.find(c =>
+      (c.channel === channel || c.channel === 'ALL') &&
+      (c.accountType === accountType) &&
+      amount >= Number(c.minAmount) &&
+      (Number(c.maxAmount) === 0 || amount <= Number(c.maxAmount))
+    );
+
+    // Fallback : meme type de compte, canal ALL
     if (!config) {
-      config = await this.prisma.feeConfig.findFirst({
-        where: { transactionType, channel: 'ALL', isActive: true },
-      });
+      config = allConfigs.find(c =>
+        c.channel === 'ALL' &&
+        c.accountType === accountType &&
+        amount >= Number(c.minAmount) &&
+        (Number(c.maxAmount) === 0 || amount <= Number(c.maxAmount))
+      );
+    }
+
+    // Fallback : accountType ALL (config generique)
+    if (!config) {
+      config = allConfigs.find(c =>
+        (c.channel === channel || c.channel === 'ALL') &&
+        c.accountType === 'ALL' &&
+        amount >= Number(c.minAmount) &&
+        (Number(c.maxAmount) === 0 || amount <= Number(c.maxAmount))
+      );
+    }
+
+    // Dernier fallback : n'importe quelle config active pour ce type de transaction
+    if (!config) {
+      config = allConfigs.find(c =>
+        (c.channel === channel || c.channel === 'ALL') &&
+        c.accountType === 'ALL'
+      );
     }
 
     let fees: number;
@@ -96,7 +169,6 @@ export class TransactionsService {
       } else {
         fees = Number(config.feeValue);
       }
-      // Apply min/max
       const minFee = Number(config.minFee);
       const maxFee = Number(config.maxFee);
       if (minFee > 0 && fees < minFee) fees = minFee;
@@ -345,12 +417,19 @@ export class TransactionsService {
     }
 
     const channel = dto.mobileMoneyProvider || 'CASH';
-    const { fees, tax } = await this.calculateFees(dto.amount, 'DEPOSIT', channel);
+    const { fees, tax } = await this.calculateFees(dto.amount, 'DEPOSIT', channel, account.type, account.accountNumber, dto.toAccountId);
+    const totalFees = fees + tax;
+    // Les frais sont deduits du montant credite sur le compte
+    const netCredit = totalFees > 0 ? dto.amount - totalFees : dto.amount;
+
+    if (netCredit <= 0) {
+      throw new BadRequestException(`Le montant (${dto.amount} FCFA) ne couvre pas les frais (${totalFees} FCFA)`);
+    }
 
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.account.update({
         where: { id: dto.toAccountId },
-        data: { balance: { increment: dto.amount } },
+        data: { balance: { increment: netCredit } },
       });
 
       const transaction = await tx.transaction.create({
@@ -413,6 +492,17 @@ export class TransactionsService {
   }
 
   async withdrawal(dto: WithdrawalDto, userId?: string) {
+    // Bloquer les retraits pour le role CAISSIER_DEPOT
+    if (userId) {
+      const operateur = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { role: { select: { name: true } } },
+      });
+      if (operateur?.role?.name === 'CAISSIER_DEPOT') {
+        throw new ForbiddenException('Votre role (Caissier Depot) ne permet pas d\'effectuer des retraits');
+      }
+    }
+
     // Verifier le plafond du role
     if (userId) await this.checkTransactionLimit(userId, dto.amount);
 
@@ -452,11 +542,11 @@ export class TransactionsService {
     }
 
     const channel = dto.mobileMoneyProvider || 'CASH';
-    const { fees, tax } = await this.calculateFees(dto.amount, 'WITHDRAWAL', channel);
+    const { fees, tax } = await this.calculateFees(dto.amount, 'WITHDRAWAL', channel, account.type, account.accountNumber, dto.fromAccountId);
     const totalDebit = dto.amount + fees + tax;
 
     if (new Prisma.Decimal(totalDebit).gt(account.balance)) {
-      throw new BadRequestException('Solde insuffisant');
+      throw new BadRequestException(`Solde insuffisant. Solde: ${account.balance} FCFA, Montant a debiter: ${totalDebit} FCFA`);
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -525,6 +615,17 @@ export class TransactionsService {
   }
 
   async transfer(dto: TransferDto, userId?: string) {
+    // Bloquer les transferts pour le role CAISSIER_DEPOT
+    if (userId) {
+      const operateur = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { role: { select: { name: true } } },
+      });
+      if (operateur?.role?.name === 'CAISSIER_DEPOT') {
+        throw new ForbiddenException('Votre role (Caissier Depot) ne permet pas d\'effectuer des transferts');
+      }
+    }
+
     // Verifier le plafond du role
     if (userId) await this.checkTransactionLimit(userId, dto.amount);
 
@@ -544,7 +645,7 @@ export class TransactionsService {
       throw new BadRequestException('Les deux comptes doivent etre actifs');
     }
 
-    const { fees, tax } = await this.calculateFees(dto.amount, 'TRANSFER', 'CASH');
+    const { fees, tax } = await this.calculateFees(dto.amount, 'TRANSFER', 'CASH', fromAccount.type);
     const totalDebit = dto.amount + fees + tax;
 
     if (new Prisma.Decimal(totalDebit).gt(fromAccount.balance)) {
@@ -627,19 +728,34 @@ export class TransactionsService {
     if (!account?.client?.phone) return;
 
     const balance = Number(account.balance);
-    const phone = account.client.phone;
     const accountNumber = account.accountNumber;
 
-    switch (type) {
-      case 'DEPOSIT':
-        return this.smsService.sendDepositAlert(phone, accountNumber, amount, balance);
-      case 'WITHDRAWAL':
-        return this.smsService.sendWithdrawalAlert(phone, accountNumber, amount, balance);
-      case 'TRANSFER_SENT':
-        return this.smsService.sendTransferSentAlert(phone, accountNumber, amount, balance);
-      case 'TRANSFER_RECEIVED':
-        return this.smsService.sendTransferReceivedAlert(phone, accountNumber, amount, balance);
+    // Collecter tous les numeros a notifier (principal + secondaire + numeros du compte)
+    const phones = new Set<string>();
+    phones.add(account.client.phone);
+    if (account.client.phoneSecondaire) phones.add(account.client.phoneSecondaire);
+    const accountPhones = account.phoneNumbers as string[] | null;
+    if (Array.isArray(accountPhones)) {
+      for (const p of accountPhones) {
+        if (p) phones.add(p.startsWith('+') ? p : `+${p}`);
+      }
     }
+
+    const sendToPhone = (phone: string) => {
+      switch (type) {
+        case 'DEPOSIT':
+          return this.smsService.sendDepositAlert(phone, accountNumber, amount, balance);
+        case 'WITHDRAWAL':
+          return this.smsService.sendWithdrawalAlert(phone, accountNumber, amount, balance);
+        case 'TRANSFER_SENT':
+          return this.smsService.sendTransferSentAlert(phone, accountNumber, amount, balance);
+        case 'TRANSFER_RECEIVED':
+          return this.smsService.sendTransferReceivedAlert(phone, accountNumber, amount, balance);
+      }
+    };
+
+    // Envoyer a tous les numeros en parallele
+    await Promise.allSettled([...phones].map(p => sendToPhone(p)));
   }
 
   // ==================== VIREMENT EXTERNE (Maker-Checker) ====================
@@ -899,6 +1015,221 @@ export class TransactionsService {
     };
   }
 
+  /**
+   * Releve de compte mensuel — liste toutes les transactions d'un compte pour un mois donne
+   * avec solde d'ouverture, solde de cloture, et totaux depots/retraits
+   */
+  async getAccountStatement(accountId: string, year: number, month: number) {
+    const account = await this.prisma.account.findUnique({
+      where: { id: accountId },
+      include: { client: true },
+    });
+    if (!account) throw new NotFoundException('Compte non trouve');
+
+    // Periode du mois
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+
+    // Transactions du mois pour ce compte
+    const transactions = await this.prisma.transaction.findMany({
+      where: {
+        status: 'COMPLETED',
+        createdAt: { gte: startDate, lte: endDate },
+        OR: [
+          { fromAccountId: accountId },
+          { toAccountId: accountId },
+        ],
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Calculer le solde d'ouverture :
+    // = solde actuel - somme des mouvements apres le debut du mois
+    const transactionsAfterStart = await this.prisma.transaction.findMany({
+      where: {
+        status: 'COMPLETED',
+        createdAt: { gte: startDate },
+        OR: [
+          { fromAccountId: accountId },
+          { toAccountId: accountId },
+        ],
+      },
+    });
+
+    let netMovementAfterStart = 0;
+    for (const tx of transactionsAfterStart) {
+      const amount = Number(tx.amount);
+      const fees = Number(tx.fees) + Number(tx.tax || 0);
+      if (tx.toAccountId === accountId) {
+        netMovementAfterStart += amount;
+      }
+      if (tx.fromAccountId === accountId) {
+        netMovementAfterStart -= (amount + fees);
+      }
+    }
+
+    const currentBalance = Number(account.balance);
+    const openingBalance = currentBalance - netMovementAfterStart;
+
+    // Calculer les totaux du mois
+    let totalDepots = 0;
+    let totalRetraits = 0;
+    let totalFrais = 0;
+    let nbDepots = 0;
+    let nbRetraits = 0;
+
+    const lignes = transactions.map(tx => {
+      const amount = Number(tx.amount);
+      const fees = Number(tx.fees) + Number(tx.tax || 0);
+      let credit = 0;
+      let debit = 0;
+
+      if (tx.toAccountId === accountId) {
+        credit = amount;
+        totalDepots += amount;
+        nbDepots++;
+      }
+      if (tx.fromAccountId === accountId) {
+        debit = amount + fees;
+        totalRetraits += amount;
+        totalFrais += fees;
+        nbRetraits++;
+      }
+
+      return {
+        date: tx.createdAt,
+        reference: tx.reference,
+        type: tx.type,
+        description: tx.description || '',
+        debit,
+        credit,
+        fees,
+      };
+    });
+
+    // Solde de cloture du mois
+    let netMovementMonth = 0;
+    for (const tx of transactions) {
+      const amount = Number(tx.amount);
+      const fees = Number(tx.fees) + Number(tx.tax || 0);
+      if (tx.toAccountId === accountId) netMovementMonth += amount;
+      if (tx.fromAccountId === accountId) netMovementMonth -= (amount + fees);
+    }
+    const closingBalance = openingBalance + netMovementMonth;
+
+    const clientName = account.client.clientType === 'MORALE'
+      ? account.client.raisonSociale
+      : `${account.client.firstName} ${account.client.lastName}`;
+
+    return {
+      compte: {
+        accountNumber: account.accountNumber,
+        accountType: account.type,
+        clientName,
+        clientId: account.client.id,
+        clientType: account.client.clientType,
+      },
+      periode: {
+        mois: month,
+        annee: year,
+        label: `${String(month).padStart(2, '0')}/${year}`,
+        debut: startDate,
+        fin: endDate,
+      },
+      soldeOuverture: openingBalance,
+      soldeCloture: closingBalance,
+      totalDepots,
+      totalRetraits,
+      totalFrais,
+      nbDepots,
+      nbRetraits,
+      nbTransactions: transactions.length,
+      lignes,
+    };
+  }
+
+  /**
+   * Historique complet des transactions d'un compte avec pagination
+   */
+  async getAccountHistory(accountId: string, params: {
+    type?: string;
+    startDate?: string;
+    endDate?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const account = await this.prisma.account.findUnique({
+      where: { id: accountId },
+      include: { client: true },
+    });
+    if (!account) throw new NotFoundException('Compte non trouve');
+
+    const { type, startDate, endDate, page = 1, limit = 50 } = params;
+    const where: any = {
+      status: 'COMPLETED',
+      OR: [
+        { fromAccountId: accountId },
+        { toAccountId: accountId },
+      ],
+    };
+    if (type) {
+      const types = type.split(',').map(t => t.trim()).filter(Boolean);
+      where.type = types.length === 1 ? types[0] : { in: types };
+    }
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) where.createdAt.lte = new Date(endDate);
+    }
+
+    const [transactions, total] = await Promise.all([
+      this.prisma.transaction.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.transaction.count({ where }),
+    ]);
+
+    const clientName = account.client.clientType === 'MORALE'
+      ? account.client.raisonSociale
+      : `${account.client.firstName} ${account.client.lastName}`;
+
+    const data = transactions.map(tx => {
+      const amount = Number(tx.amount);
+      const fees = Number(tx.fees) + Number(tx.tax || 0);
+      let credit = 0;
+      let debit = 0;
+      if (tx.toAccountId === accountId) credit = amount;
+      if (tx.fromAccountId === accountId) debit = amount + fees;
+
+      return {
+        id: tx.id,
+        date: tx.createdAt,
+        reference: tx.reference,
+        type: tx.type,
+        description: tx.description || '',
+        debit,
+        credit,
+        fees,
+        channel: tx.mobileMoneyProvider || 'CASH',
+        status: tx.status,
+      };
+    });
+
+    return {
+      compte: {
+        accountNumber: account.accountNumber,
+        accountType: account.type,
+        clientName,
+        balance: Number(account.balance),
+      },
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
   async findOne(id: string) {
     const transaction = await this.prisma.transaction.findUnique({
       where: { id },
@@ -1009,6 +1340,121 @@ export class TransactionsService {
       // Footer
       institution: 'MicroFinance Cameroun EMF',
       disclaimer: 'Ce recu fait foi de la transaction effectuee. Conservez-le precieusement.',
+    };
+  }
+
+  // ==================== CONTRE-PASSATION ====================
+
+  async reverseTransaction(transactionId: string, reason: string, userId: string) {
+    const original = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: { fromAccount: true, toAccount: true },
+    });
+
+    if (!original) throw new NotFoundException('Transaction non trouvee');
+    if (original.status !== 'COMPLETED') {
+      throw new BadRequestException('Seules les transactions completees peuvent etre contre-passees');
+    }
+
+    // Verifier qu'elle n'a pas deja ete contre-passee
+    const alreadyReversed = await this.prisma.transaction.findFirst({
+      where: { description: { contains: `CONTREPASSATION de ${original.reference}` } },
+    });
+    if (alreadyReversed) {
+      throw new BadRequestException(`Cette transaction a deja ete contre-passee (ref: ${alreadyReversed.reference})`);
+    }
+
+    const amount = Number(original.amount);
+    const fees = Number(original.fees);
+    const tax = Number(original.tax || 0);
+    const totalWithFees = amount + fees + tax;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Selon le type, inverser les mouvements
+      if (original.type === 'DEPOSIT') {
+        // Depot errone : on debite le compte qui avait ete credite
+        if (!original.toAccountId) throw new BadRequestException('Compte destination introuvable');
+        const account = await tx.account.findUnique({ where: { id: original.toAccountId } });
+        if (Number(account!.balance) < amount) {
+          throw new BadRequestException(`Solde insuffisant pour contre-passer. Solde actuel: ${account!.balance} FCFA, montant a debiter: ${amount} FCFA`);
+        }
+        await tx.account.update({
+          where: { id: original.toAccountId },
+          data: { balance: { decrement: amount } },
+        });
+      } else if (original.type === 'WITHDRAWAL') {
+        // Retrait errone : on re-credite le compte + les frais
+        if (!original.fromAccountId) throw new BadRequestException('Compte source introuvable');
+        await tx.account.update({
+          where: { id: original.fromAccountId },
+          data: { balance: { increment: totalWithFees } },
+        });
+      } else if (original.type === 'TRANSFER' || original.type === 'SALARY_PAYMENT') {
+        // Virement errone : on re-credite la source et debite la destination
+        if (!original.fromAccountId || !original.toAccountId) {
+          throw new BadRequestException('Comptes source/destination introuvables');
+        }
+        const toAccount = await tx.account.findUnique({ where: { id: original.toAccountId } });
+        if (Number(toAccount!.balance) < amount) {
+          throw new BadRequestException(`Solde insuffisant sur le compte destination pour contre-passer. Solde: ${toAccount!.balance} FCFA`);
+        }
+        // Re-crediter la source (montant + frais + taxe)
+        await tx.account.update({
+          where: { id: original.fromAccountId },
+          data: { balance: { increment: totalWithFees } },
+        });
+        // Debiter la destination
+        await tx.account.update({
+          where: { id: original.toAccountId },
+          data: { balance: { decrement: amount } },
+        });
+      } else {
+        throw new BadRequestException(`Contre-passation non supportee pour le type: ${original.type}`);
+      }
+
+      // Marquer la transaction originale comme annulee
+      await tx.transaction.update({
+        where: { id: transactionId },
+        data: { status: 'CANCELLED' },
+      });
+
+      // Creer la transaction de contre-passation
+      const reversal = await tx.transaction.create({
+        data: {
+          reference: `REV-${this.generateReference()}`,
+          type: original.type,
+          amount: original.amount,
+          fees: original.fees,
+          tax: original.tax || 0,
+          status: 'COMPLETED',
+          fromAccountId: original.type === 'DEPOSIT' ? original.toAccountId : original.fromAccountId,
+          toAccountId: original.type === 'WITHDRAWAL' ? original.fromAccountId : original.toAccountId,
+          agencyId: original.agencyId,
+          description: `CONTREPASSATION de ${original.reference} — Motif: ${reason}`,
+        },
+      });
+
+      return reversal;
+    });
+
+    // Piste d'audit
+    this.auditService.log({
+      userId,
+      action: 'UPDATE',
+      module: 'TRANSACTIONS',
+      entityId: transactionId,
+      entityType: 'Transaction',
+      details: `Contre-passation de ${original.reference} (${original.type}, ${amount} FCFA) — Motif: ${reason}`,
+    }).catch((e) => console.error('[AUDIT]', e.message));
+
+    return {
+      message: `Transaction ${original.reference} contre-passee avec succes`,
+      originalTransaction: original.reference,
+      reversalTransaction: result.reference,
+      amount,
+      fees,
+      tax,
+      reason,
     };
   }
 }

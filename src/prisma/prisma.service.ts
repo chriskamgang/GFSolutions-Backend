@@ -8,6 +8,11 @@ const adapter = new PrismaMariaDb({
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'microfinance_db',
+  connectionLimit: 5,
+  acquireTimeout: 30000,
+  idleTimeout: 60000,
+  resetAfterUse: true,
+  allowPublicKeyRetrieval: true,
 });
 
 @Injectable()

@@ -929,6 +929,652 @@ export class ReportsService {
     };
   }
 
+  // ==================== RAPPORTS DGI ====================
+
+  /**
+   * Declaration TVA mensuelle
+   * TVA collectee (compte 451) - TVA deductible (compte 452) = TVA nette a reverser
+   * Taux standard Cameroun : 19,25%
+   */
+  async getDgiTva(year: number, month: number) {
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59);
+    const dateFilter = { date: { gte: startDate, lte: endDate } };
+
+    // TVA collectee sur les transactions (somme directe des champs tax)
+    const tvaTransactions = await this.prisma.transaction.aggregate({
+      _sum: { tax: true, fees: true },
+      _count: true,
+      where: { status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate } },
+    });
+
+    // TVA collectee par type d'operation
+    const txTypes = ['DEPOSIT', 'WITHDRAWAL', 'TRANSFER'] as const;
+    const txLabels: Record<string, string> = { DEPOSIT: 'Depots', WITHDRAWAL: 'Retraits', TRANSFER: 'Transferts' };
+    const tvaByType = await Promise.all(
+      txTypes.map(async (type) => {
+        const agg = await this.prisma.transaction.aggregate({
+          _sum: { tax: true, fees: true, amount: true },
+          _count: true,
+          where: { type, status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate } },
+        });
+        return {
+          type,
+          label: txLabels[type],
+          nbOperations: agg._count ?? 0,
+          baseImposable: Number(agg._sum?.fees || 0),
+          tvaCollectee: Number(agg._sum?.tax || 0),
+          chiffreAffaires: Number(agg._sum?.amount || 0),
+        };
+      }),
+    );
+
+    // TVA sur frais d'ouverture de compte
+    const compteCommissions = await this.prisma.accountPlan.findFirst({ where: { code: '702' } });
+    const compteTvaCollectee = await this.prisma.accountPlan.findFirst({ where: { code: '451' } });
+    const compteTvaDeductible = await this.prisma.accountPlan.findFirst({ where: { code: '452' } });
+
+    let tvaCollecteeComptable = 0;
+    let tvaDeductibleComptable = 0;
+
+    if (compteTvaCollectee) {
+      const agg = await this.prisma.journalEntry.aggregate({
+        _sum: { credit: true, debit: true },
+        where: { accountId: compteTvaCollectee.id, ...dateFilter },
+      });
+      tvaCollecteeComptable = Number(agg._sum.credit || 0) - Number(agg._sum.debit || 0);
+    }
+
+    if (compteTvaDeductible) {
+      const agg = await this.prisma.journalEntry.aggregate({
+        _sum: { debit: true, credit: true },
+        where: { accountId: compteTvaDeductible.id, ...dateFilter },
+      });
+      tvaDeductibleComptable = Number(agg._sum.debit || 0) - Number(agg._sum.credit || 0);
+    }
+
+    // TVA sur paiements de factures
+    const tvaBillPayments = await this.prisma.billPayment.aggregate({
+      _sum: { fees: true },
+      _count: true,
+      where: { createdAt: { gte: startDate, lte: endDate }, status: 'COLLECTED' },
+    });
+    const tvaFactures = Math.round(Number(tvaBillPayments._sum.fees || 0) * 19.25 / 100);
+
+    const totalTvaCollectee = Number(tvaTransactions._sum.tax || 0) + tvaFactures;
+    const tvaNette = totalTvaCollectee - tvaDeductibleComptable;
+
+    // Date limite de declaration (15 du mois suivant)
+    const dateLimite = new Date(year, month, 15);
+
+    return {
+      titre: 'DECLARATION DE TVA MENSUELLE',
+      emf: 'Global Financial Solution (GFS)',
+      periode: `${String(month).padStart(2, '0')}/${year}`,
+      dateLimiteDeclaration: dateLimite.toISOString().slice(0, 10),
+      tauxTva: 19.25,
+
+      detailParOperation: tvaByType.filter(t => (typeof t.nbOperations === 'number' ? t.nbOperations : 0) > 0),
+
+      paiementsFactures: {
+        nbOperations: tvaBillPayments._count,
+        commissionsPerçues: Number(tvaBillPayments._sum.fees || 0),
+        tvaCollectee: tvaFactures,
+      },
+
+      synthese: {
+        totalBaseImposable: Number(tvaTransactions._sum.fees || 0) + Number(tvaBillPayments._sum.fees || 0),
+        tvaCollectee: totalTvaCollectee,
+        tvaDeductible: tvaDeductibleComptable,
+        tvaNette,
+        montantAReverser: Math.max(0, tvaNette),
+        creditTva: tvaNette < 0 ? Math.abs(tvaNette) : 0,
+      },
+
+      comptabilite: {
+        compteTvaCollectee: { code: '451', solde: tvaCollecteeComptable },
+        compteTvaDeductible: { code: '452', solde: tvaDeductibleComptable },
+      },
+    };
+  }
+
+  /**
+   * Declaration Statistique et Fiscale (DSF) annuelle
+   * Resume complet de l'activite financiere pour la DGI
+   */
+  async getDgiDsf(year: number) {
+    const startDate = new Date(year, 0, 1);
+    const endDate = new Date(year, 11, 31, 23, 59, 59);
+    const dateFilter = { date: { gte: startDate, lte: endDate } };
+
+    // Produits d'exploitation (classe 7)
+    const produitCodes = ['701', '702', '703', '71'];
+    const produits: { code: string; label: string; montant: number }[] = [];
+    const labels: Record<string, string> = {
+      '701': 'Interets sur credits',
+      '702': 'Commissions et frais',
+      '703': 'Penalites de retard',
+      '71': 'Produits divers',
+    };
+
+    for (const code of produitCodes) {
+      const account = await this.prisma.accountPlan.findFirst({ where: { code } });
+      if (account) {
+        const agg = await this.prisma.journalEntry.aggregate({
+          _sum: { credit: true, debit: true },
+          where: { accountId: account.id, ...dateFilter },
+        });
+        const montant = Number(agg._sum.credit || 0) - Number(agg._sum.debit || 0);
+        produits.push({ code, label: labels[code] || account.name, montant });
+      }
+    }
+
+    // Charges d'exploitation (classe 6)
+    const chargeCodes = ['601', '61', '62', '63', '64'];
+    const charges: { code: string; label: string; montant: number }[] = [];
+    const chargeLabels: Record<string, string> = {
+      '601': 'Interets verses aux deposants',
+      '61': 'Charges generales d\'exploitation',
+      '62': 'Charges de personnel',
+      '63': 'Dotations aux amortissements',
+      '64': 'Dotations aux provisions',
+    };
+
+    for (const code of chargeCodes) {
+      const account = await this.prisma.accountPlan.findFirst({ where: { code } });
+      if (account) {
+        const agg = await this.prisma.journalEntry.aggregate({
+          _sum: { debit: true, credit: true },
+          where: { accountId: account.id, ...dateFilter },
+        });
+        const montant = Number(agg._sum.debit || 0) - Number(agg._sum.credit || 0);
+        charges.push({ code, label: chargeLabels[code] || account.name, montant });
+      }
+    }
+
+    const totalProduits = produits.reduce((sum, p) => sum + p.montant, 0);
+    const totalCharges = charges.reduce((sum, c) => sum + c.montant, 0);
+    const resultatAvantImpot = totalProduits - totalCharges;
+
+    // TVA annuelle
+    const tvaAnnuelle = await this.prisma.transaction.aggregate({
+      _sum: { tax: true, fees: true },
+      where: { status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate } },
+    });
+
+    // IS (Impot sur les Societes) — 33% du benefice ou 2,2% du CA (minimum de perception)
+    const tauxIS = 33;
+    const tauxMinPerception = 2.2;
+    const chiffreAffaires = totalProduits;
+    const isCalcule = Math.round(Math.max(0, resultatAvantImpot) * tauxIS / 100);
+    const minPerception = Math.round(chiffreAffaires * tauxMinPerception / 100);
+    const isFinal = Math.max(isCalcule, minPerception);
+
+    const resultatNet = resultatAvantImpot - isFinal;
+
+    // Volume d'activite
+    const [totalTransactions, totalDepots, totalRetraits, totalCreditsDecaisses] = await Promise.all([
+      this.prisma.transaction.count({ where: { status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate } } }),
+      this.prisma.transaction.aggregate({ _sum: { amount: true }, where: { type: 'DEPOSIT', status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate } } }),
+      this.prisma.transaction.aggregate({ _sum: { amount: true }, where: { type: 'WITHDRAWAL', status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate } } }),
+      this.prisma.credit.aggregate({ _sum: { amount: true }, where: { disbursedAt: { gte: startDate, lte: endDate } } }),
+    ]);
+
+    // Situation patrimoniale
+    const [totalDepotsClients, encourCredits, fondsPropres] = await Promise.all([
+      this.prisma.account.aggregate({ _sum: { balance: true }, where: { status: 'ACTIVE' } }),
+      this.prisma.credit.aggregate({ _sum: { remainingAmount: true }, where: { status: { in: ['ACTIVE', 'DISBURSED'] } } }),
+      (async () => {
+        const fpAccounts = await this.prisma.accountPlan.findMany({ where: { code: { in: ['40', '41', '42'] } } });
+        let fp = 0;
+        for (const acc of fpAccounts) {
+          const agg = await this.prisma.journalEntry.aggregate({
+            _sum: { credit: true, debit: true },
+            where: { accountId: acc.id },
+          });
+          fp += Number(agg._sum.credit || 0) - Number(agg._sum.debit || 0);
+        }
+        return fp;
+      })(),
+    ]);
+
+    return {
+      titre: 'DECLARATION STATISTIQUE ET FISCALE (DSF)',
+      emf: 'Global Financial Solution (GFS)',
+      exercice: year,
+      dateGeneration: new Date().toISOString(),
+
+      identificationFiscale: {
+        raisonSociale: 'Global Financial Solution SA',
+        formeJuridique: 'SA',
+        activitePrincipale: 'Etablissement de Microfinance (EMF) de 2eme categorie',
+        regimeFiscal: 'Regime du reel',
+      },
+
+      compteResultat: {
+        produits,
+        totalProduits,
+        charges,
+        totalCharges,
+        resultatAvantImpot,
+        impotSurLesSocietes: {
+          taux: tauxIS,
+          isCalcule,
+          minimumPerception: { taux: tauxMinPerception, montant: minPerception },
+          isFinal,
+          mode: isCalcule >= minPerception ? 'IS normal' : 'Minimum de perception',
+        },
+        resultatNet,
+      },
+
+      tvaAnnuelle: {
+        totalBaseImposable: Number(tvaAnnuelle._sum.fees || 0),
+        totalTvaCollectee: Number(tvaAnnuelle._sum.tax || 0),
+      },
+
+      volumeActivite: {
+        nbTransactions: totalTransactions,
+        totalDepots: Number(totalDepots._sum.amount || 0),
+        totalRetraits: Number(totalRetraits._sum.amount || 0),
+        totalCreditsDecaisses: Number(totalCreditsDecaisses._sum.amount || 0),
+      },
+
+      situationPatrimoniale: {
+        totalDepotsClients: Number(totalDepotsClients._sum.balance || 0),
+        encourCredits: Number(encourCredits._sum.remainingAmount || 0),
+        fondsPropres,
+      },
+    };
+  }
+
+  /**
+   * Retenues IRCM (Impot sur les Revenus des Capitaux Mobiliers)
+   * 16,5% sur les interets verses aux epargnants (compte 601)
+   */
+  async getDgiIrcm(year: number, month?: number) {
+    const startDate = month
+      ? new Date(year, month - 1, 1)
+      : new Date(year, 0, 1);
+    const endDate = month
+      ? new Date(year, month, 0, 23, 59, 59)
+      : new Date(year, 11, 31, 23, 59, 59);
+
+    const tauxIrcm = 16.5;
+
+    // Interets verses aux deposants via ecritures comptables (compte 601)
+    const compteInteretsDepots = await this.prisma.accountPlan.findFirst({ where: { code: '601' } });
+
+    let totalInteretsVerses = 0;
+    let detailEcritures: any[] = [];
+
+    if (compteInteretsDepots) {
+      const entries = await this.prisma.journalEntry.findMany({
+        where: {
+          accountId: compteInteretsDepots.id,
+          date: { gte: startDate, lte: endDate },
+          debit: { gt: 0 },
+        },
+        orderBy: { date: 'asc' },
+      });
+
+      totalInteretsVerses = entries.reduce((sum, e) => sum + Number(e.debit), 0);
+
+      // Regrouper par mois
+      const parMois: Record<string, { mois: string; montantInterets: number; ircm: number; nbEcritures: number }> = {};
+      for (const entry of entries) {
+        const key = `${entry.date.getFullYear()}-${String(entry.date.getMonth() + 1).padStart(2, '0')}`;
+        if (!parMois[key]) {
+          parMois[key] = { mois: key, montantInterets: 0, ircm: 0, nbEcritures: 0 };
+        }
+        parMois[key].montantInterets += Number(entry.debit);
+        parMois[key].nbEcritures++;
+      }
+      // Calculer IRCM par mois
+      for (const m of Object.values(parMois)) {
+        m.ircm = Math.round(m.montantInterets * tauxIrcm / 100);
+      }
+      detailEcritures = Object.values(parMois).sort((a, b) => a.mois.localeCompare(b.mois));
+    }
+
+    // Interets sur DAT (comptes epargne remuneres)
+    const comptesDAT = await this.prisma.account.findMany({
+      where: { type: 'DAT', status: 'ACTIVE', interestRate: { gt: 0 } },
+      include: { client: { select: { firstName: true, lastName: true, raisonSociale: true, clientNumber: true, clientType: true } } },
+    });
+
+    const datDetails = comptesDAT.map(acc => {
+      const interetAnnuel = Number(acc.balance) * Number(acc.interestRate) / 100;
+      const interetPeriode = month ? interetAnnuel / 12 : interetAnnuel;
+      return {
+        accountNumber: acc.accountNumber,
+        client: acc.client.clientType === 'MORALE' ? acc.client.raisonSociale : `${acc.client.firstName} ${acc.client.lastName}`,
+        clientNumber: acc.client.clientNumber,
+        solde: Number(acc.balance),
+        tauxInteret: Number(acc.interestRate),
+        interetEstime: Math.round(interetPeriode),
+        ircmEstime: Math.round(interetPeriode * tauxIrcm / 100),
+      };
+    });
+
+    const totalIrcm = Math.round(totalInteretsVerses * tauxIrcm / 100);
+
+    return {
+      titre: 'RETENUES IRCM - IMPOT SUR LES REVENUS DES CAPITAUX MOBILIERS',
+      emf: 'Global Financial Solution (GFS)',
+      periode: month ? `${String(month).padStart(2, '0')}/${year}` : `Exercice ${year}`,
+      tauxIrcm,
+
+      interetsVerses: {
+        total: totalInteretsVerses,
+        detailParMois: detailEcritures,
+      },
+
+      ircm: {
+        baseImposable: totalInteretsVerses,
+        taux: tauxIrcm,
+        montantIrcm: totalIrcm,
+      },
+
+      comptesDAT: {
+        nbComptes: datDetails.length,
+        details: datDetails,
+        totalInteretsEstimes: datDetails.reduce((sum, d) => sum + d.interetEstime, 0),
+        totalIrcmEstime: datDetails.reduce((sum, d) => sum + d.ircmEstime, 0),
+      },
+    };
+  }
+
+  /**
+   * Calcul Impot sur les Societes (IS) annuel
+   * Taux : 33% du benefice net (ou 2,2% du CA si minimum de perception)
+   */
+  async getDgiIs(year: number) {
+    const startDate = new Date(year, 0, 1);
+    const endDate = new Date(year, 11, 31, 23, 59, 59);
+    const dateFilter = { date: { gte: startDate, lte: endDate } };
+
+    // Produits (classe 7)
+    const produitAccounts = await this.prisma.accountPlan.findMany({ where: { type: 'PRODUIT', level: { gte: 2 } } });
+    const produitsDetail: { code: string; nom: string; montant: number }[] = [];
+    let totalProduits = 0;
+    for (const acc of produitAccounts) {
+      const agg = await this.prisma.journalEntry.aggregate({
+        _sum: { credit: true, debit: true },
+        where: { accountId: acc.id, ...dateFilter },
+      });
+      const montant = Number(agg._sum.credit || 0) - Number(agg._sum.debit || 0);
+      if (montant !== 0) {
+        produitsDetail.push({ code: acc.code, nom: acc.name, montant });
+        totalProduits += montant;
+      }
+    }
+
+    // Charges (classe 6)
+    const chargeAccounts = await this.prisma.accountPlan.findMany({ where: { type: 'CHARGE', level: { gte: 2 } } });
+    const chargesDetail: { code: string; nom: string; montant: number }[] = [];
+    let totalCharges = 0;
+    for (const acc of chargeAccounts) {
+      const agg = await this.prisma.journalEntry.aggregate({
+        _sum: { debit: true, credit: true },
+        where: { accountId: acc.id, ...dateFilter },
+      });
+      const montant = Number(agg._sum.debit || 0) - Number(agg._sum.credit || 0);
+      if (montant !== 0) {
+        chargesDetail.push({ code: acc.code, nom: acc.name, montant });
+        totalCharges += montant;
+      }
+    }
+
+    const resultatComptable = totalProduits - totalCharges;
+
+    // Reintegrations fiscales (charges non deductibles) — simplifie pour EMF
+    const reintegrations = {
+      amendesPenalites: 0,
+      chargesNonJustifiees: 0,
+      total: 0,
+    };
+
+    // Deductions fiscales
+    const deductions = {
+      plusValuesReinvesties: 0,
+      total: 0,
+    };
+
+    const resultatFiscal = resultatComptable + reintegrations.total - deductions.total;
+
+    // Calcul IS
+    const tauxIS = 33;
+    const tauxMinPerception = 2.2;
+    const tauxCentimesAdditionnels = 10; // 10% de l'IS au Cameroun
+
+    const isNormal = Math.round(Math.max(0, resultatFiscal) * tauxIS / 100);
+    const minPerception = Math.round(totalProduits * tauxMinPerception / 100);
+    const isPrincipal = Math.max(isNormal, minPerception);
+    const centimesAdditionnels = Math.round(isPrincipal * tauxCentimesAdditionnels / 100);
+    const isTotalDu = isPrincipal + centimesAdditionnels;
+
+    // Acomptes verses (simplifie — a enrichir avec un module de suivi des paiements)
+    const acomptesVerses = 0;
+    const soldeIS = isTotalDu - acomptesVerses;
+
+    // Echeancier des acomptes (mois de mars, juin, septembre)
+    const acomptes = [
+      { echeance: `15/03/${year}`, montant: Math.round(isTotalDu / 3), statut: 'A payer' },
+      { echeance: `15/06/${year}`, montant: Math.round(isTotalDu / 3), statut: 'A payer' },
+      { echeance: `15/09/${year}`, montant: isTotalDu - 2 * Math.round(isTotalDu / 3), statut: 'A payer' },
+    ];
+
+    return {
+      titre: 'IMPOT SUR LES SOCIETES (IS)',
+      emf: 'Global Financial Solution (GFS)',
+      exercice: year,
+      dateGeneration: new Date().toISOString(),
+
+      produits: { detail: produitsDetail, total: totalProduits },
+      charges: { detail: chargesDetail, total: totalCharges },
+
+      determination: {
+        resultatComptable,
+        reintegrations,
+        deductions,
+        resultatFiscal,
+      },
+
+      calcul: {
+        tauxIS,
+        isNormal,
+        minimumPerception: { taux: tauxMinPerception, montant: minPerception },
+        isPrincipal,
+        mode: isNormal >= minPerception ? 'IS normal (33%)' : 'Minimum de perception (2,2% du CA)',
+        centimesAdditionnels: { taux: tauxCentimesAdditionnels, montant: centimesAdditionnels },
+        isTotalDu,
+      },
+
+      paiement: {
+        isTotalDu,
+        acomptesVerses,
+        soldeRestant: soldeIS,
+        echeancier: acomptes,
+      },
+    };
+  }
+
+  /**
+   * Tableau de bord fiscal annuel — synthese de toutes les obligations DGI
+   */
+  async getDgiSummary(year: number) {
+    // TVA mensuelle — 12 mois
+    const tvaMensuelle: { mois: string; tvaCollectee: number; tvaDeductible: number; tvaNette: number }[] = [];
+    for (let m = 1; m <= 12; m++) {
+      const startDate = new Date(year, m - 1, 1);
+      const endDate = new Date(year, m, 0, 23, 59, 59);
+
+      const tvaMonth = await this.prisma.transaction.aggregate({
+        _sum: { tax: true },
+        where: { status: 'COMPLETED', createdAt: { gte: startDate, lte: endDate } },
+      });
+
+      const collectee = Number(tvaMonth._sum.tax || 0);
+      tvaMensuelle.push({
+        mois: `${String(m).padStart(2, '0')}/${year}`,
+        tvaCollectee: collectee,
+        tvaDeductible: 0,
+        tvaNette: collectee,
+      });
+    }
+
+    const totalTvaAnnuelle = tvaMensuelle.reduce((sum, m) => sum + m.tvaNette, 0);
+
+    // IS
+    const isData = await this.getDgiIs(year);
+
+    // IRCM
+    const ircmData = await this.getDgiIrcm(year);
+
+    // Calendrier fiscal
+    const obligations = [
+      ...Array.from({ length: 12 }, (_, i) => ({
+        type: 'TVA',
+        periode: `${String(i + 1).padStart(2, '0')}/${year}`,
+        dateLimite: `15/${String(i + 2 > 12 ? 1 : i + 2).padStart(2, '0')}/${i + 2 > 12 ? year + 1 : year}`,
+        montant: tvaMensuelle[i].tvaNette,
+        statut: new Date() > new Date(year, i + 1, 15) ? 'Echu' : 'A venir',
+      })),
+      { type: 'IS - 1er acompte', periode: `Exercice ${year}`, dateLimite: `15/03/${year}`, montant: isData.paiement.echeancier[0]?.montant || 0, statut: new Date() > new Date(year, 2, 15) ? 'Echu' : 'A venir' },
+      { type: 'IS - 2eme acompte', periode: `Exercice ${year}`, dateLimite: `15/06/${year}`, montant: isData.paiement.echeancier[1]?.montant || 0, statut: new Date() > new Date(year, 5, 15) ? 'Echu' : 'A venir' },
+      { type: 'IS - 3eme acompte', periode: `Exercice ${year}`, dateLimite: `15/09/${year}`, montant: isData.paiement.echeancier[2]?.montant || 0, statut: new Date() > new Date(year, 8, 15) ? 'Echu' : 'A venir' },
+      { type: 'DSF', periode: `Exercice ${year}`, dateLimite: `15/03/${year + 1}`, montant: null, statut: new Date() > new Date(year + 1, 2, 15) ? 'Echu' : 'A venir' },
+      { type: 'IRCM', periode: `Exercice ${year}`, dateLimite: `15/03/${year + 1}`, montant: ircmData.ircm.montantIrcm, statut: new Date() > new Date(year + 1, 2, 15) ? 'Echu' : 'A venir' },
+    ];
+
+    const totalObligations = totalTvaAnnuelle + isData.paiement.isTotalDu + ircmData.ircm.montantIrcm;
+
+    return {
+      titre: 'TABLEAU DE BORD FISCAL ANNUEL',
+      emf: 'Global Financial Solution (GFS)',
+      exercice: year,
+      dateGeneration: new Date().toISOString(),
+
+      synthese: {
+        totalTvaAnnuelle,
+        totalIS: isData.paiement.isTotalDu,
+        totalIrcm: ircmData.ircm.montantIrcm,
+        totalObligationsFiscales: totalObligations,
+        resultatAvantImpot: isData.determination.resultatComptable,
+        resultatApresImpot: isData.determination.resultatComptable - isData.paiement.isTotalDu,
+        tauxImpositionEffectif: isData.determination.resultatComptable > 0
+          ? Math.round((isData.paiement.isTotalDu / isData.determination.resultatComptable) * 10000) / 100
+          : 0,
+      },
+
+      tva: { mensuel: tvaMensuelle, totalAnnuel: totalTvaAnnuelle },
+
+      is: {
+        resultatFiscal: isData.determination.resultatFiscal,
+        isTotalDu: isData.paiement.isTotalDu,
+        mode: isData.calcul.mode,
+      },
+
+      ircm: {
+        interetsVerses: ircmData.interetsVerses.total,
+        montantIrcm: ircmData.ircm.montantIrcm,
+      },
+
+      calendrier: obligations,
+    };
+  }
+
+  /**
+   * Export Excel des rapports DGI
+   */
+  async generateDgiExcel(year: number, type: string): Promise<Buffer> {
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+
+    if (type === 'TVA' || type === 'ALL') {
+      const summary = await this.getDgiSummary(year);
+      const tvaSheet: any[][] = [
+        ['DECLARATIONS TVA MENSUELLES - Exercice ' + year],
+        [''],
+        ['Mois', 'TVA Collectee (FCFA)', 'TVA Deductible (FCFA)', 'TVA Nette (FCFA)'],
+        ...summary.tva.mensuel.map(m => [m.mois, m.tvaCollectee, m.tvaDeductible, m.tvaNette]),
+        [''],
+        ['TOTAL ANNUEL', summary.tva.totalAnnuel, 0, summary.tva.totalAnnuel],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(tvaSheet);
+      ws['!cols'] = [{ wch: 15 }, { wch: 22 }, { wch: 22 }, { wch: 22 }];
+      XLSX.utils.book_append_sheet(wb, ws, 'TVA Mensuelle');
+    }
+
+    if (type === 'DSF' || type === 'ALL') {
+      const dsf = await this.getDgiDsf(year);
+      const dsfSheet: any[][] = [
+        ['DECLARATION STATISTIQUE ET FISCALE (DSF) - Exercice ' + year],
+        [''],
+        ['PRODUITS D\'EXPLOITATION', '', 'Montant (FCFA)'],
+        ...dsf.compteResultat.produits.map(p => [p.code, p.label, p.montant]),
+        ['', 'TOTAL PRODUITS', dsf.compteResultat.totalProduits],
+        [''],
+        ['CHARGES D\'EXPLOITATION', '', 'Montant (FCFA)'],
+        ...dsf.compteResultat.charges.map(c => [c.code, c.label, c.montant]),
+        ['', 'TOTAL CHARGES', dsf.compteResultat.totalCharges],
+        [''],
+        ['', 'RESULTAT AVANT IMPOT', dsf.compteResultat.resultatAvantImpot],
+        ['', 'IMPOT SUR LES SOCIETES', dsf.compteResultat.impotSurLesSocietes.isFinal],
+        ['', 'RESULTAT NET', dsf.compteResultat.resultatNet],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(dsfSheet);
+      ws['!cols'] = [{ wch: 10 }, { wch: 40 }, { wch: 22 }];
+      XLSX.utils.book_append_sheet(wb, ws, 'DSF');
+    }
+
+    if (type === 'IRCM' || type === 'ALL') {
+      const ircm = await this.getDgiIrcm(year);
+      const ircmSheet: any[][] = [
+        ['RETENUES IRCM - Exercice ' + year],
+        ['Taux IRCM :', `${ircm.tauxIrcm}%`],
+        [''],
+        ['Mois', 'Interets verses (FCFA)', 'IRCM retenu (FCFA)', 'Nb ecritures'],
+        ...ircm.interetsVerses.detailParMois.map((m: any) => [m.mois, m.montantInterets, m.ircm, m.nbEcritures]),
+        [''],
+        ['TOTAL', ircm.ircm.baseImposable, ircm.ircm.montantIrcm, ''],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(ircmSheet);
+      ws['!cols'] = [{ wch: 15 }, { wch: 25 }, { wch: 22 }, { wch: 15 }];
+      XLSX.utils.book_append_sheet(wb, ws, 'IRCM');
+    }
+
+    if (type === 'IS' || type === 'ALL') {
+      const is = await this.getDgiIs(year);
+      const isSheet: any[][] = [
+        ['IMPOT SUR LES SOCIETES - Exercice ' + year],
+        [''],
+        ['PRODUITS', '', 'Montant (FCFA)'],
+        ...is.produits.detail.map(p => [p.code, p.nom, p.montant]),
+        ['', 'TOTAL PRODUITS', is.produits.total],
+        [''],
+        ['CHARGES', '', 'Montant (FCFA)'],
+        ...is.charges.detail.map(c => [c.code, c.nom, c.montant]),
+        ['', 'TOTAL CHARGES', is.charges.total],
+        [''],
+        ['', 'Resultat comptable', is.determination.resultatComptable],
+        ['', 'Resultat fiscal', is.determination.resultatFiscal],
+        [''],
+        ['', 'IS normal (33%)', is.calcul.isNormal],
+        ['', 'Minimum de perception (2,2%)', is.calcul.minimumPerception.montant],
+        ['', 'IS retenu', is.calcul.isPrincipal],
+        ['', 'Centimes additionnels (10%)', is.calcul.centimesAdditionnels.montant],
+        ['', 'IS TOTAL DU', is.calcul.isTotalDu],
+        ['', 'Mode', is.calcul.mode],
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(isSheet);
+      ws['!cols'] = [{ wch: 10 }, { wch: 40 }, { wch: 22 }];
+      XLSX.utils.book_append_sheet(wb, ws, 'IS');
+    }
+
+    return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+  }
+
   /**
    * Genere le rapport COBAC complet au format Excel (xlsx)
    * Feuille 1 : Ratios prudentiels
@@ -1027,5 +1673,87 @@ export class ReportsService {
     XLSX.utils.book_append_sheet(wb, ws3, 'Qualite Portefeuille');
 
     return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+  }
+
+  // ==================== RAPPORT DES FRAIS ====================
+
+  async getFeesReport(startDate?: string, endDate?: string) {
+    const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const end = endDate ? new Date(endDate + 'T23:59:59') : new Date();
+
+    // Toutes les transactions avec frais dans la periode
+    const transactions = await this.prisma.transaction.findMany({
+      where: {
+        createdAt: { gte: start, lte: end },
+        status: 'COMPLETED',
+        OR: [{ fees: { gt: 0 } }, { tax: { gt: 0 } }],
+      },
+      include: {
+        toAccount: { select: { accountNumber: true, type: true, client: { select: { firstName: true, lastName: true } } } },
+        fromAccount: { select: { accountNumber: true, type: true, client: { select: { firstName: true, lastName: true } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Detail par transaction
+    const details = transactions.map(t => {
+      const acct = t.type === 'DEPOSIT' ? t.toAccount : t.fromAccount;
+      return {
+        date: t.createdAt,
+        reference: t.reference,
+        type: t.type,
+        accountNumber: acct?.accountNumber || '',
+        accountType: acct?.type || '',
+        clientName: acct?.client ? `${acct.client.firstName || ''} ${acct.client.lastName || ''}`.trim() : '',
+        amount: Number(t.amount),
+        fees: Number(t.fees),
+        tax: Number(t.tax),
+        totalFees: Number(t.fees) + Number(t.tax),
+        description: t.description,
+      };
+    });
+
+    // Totaux par type de transaction
+    const byType: Record<string, { count: number; totalFees: number; totalTax: number }> = {};
+    for (const d of details) {
+      if (!byType[d.type]) byType[d.type] = { count: 0, totalFees: 0, totalTax: 0 };
+      byType[d.type].count++;
+      byType[d.type].totalFees += d.fees;
+      byType[d.type].totalTax += d.tax;
+    }
+
+    // Totaux par type de compte
+    const byAccountType: Record<string, { count: number; totalFees: number; totalTax: number }> = {};
+    for (const d of details) {
+      const at = d.accountType || 'AUTRE';
+      if (!byAccountType[at]) byAccountType[at] = { count: 0, totalFees: 0, totalTax: 0 };
+      byAccountType[at].count++;
+      byAccountType[at].totalFees += d.fees;
+      byAccountType[at].totalTax += d.tax;
+    }
+
+    const grandTotalFees = details.reduce((s, d) => s + d.fees, 0);
+    const grandTotalTax = details.reduce((s, d) => s + d.tax, 0);
+
+    return {
+      period: { start, end },
+      summary: {
+        totalTransactions: details.length,
+        totalFees: grandTotalFees,
+        totalTax: grandTotalTax,
+        grandTotal: grandTotalFees + grandTotalTax,
+      },
+      byTransactionType: Object.entries(byType).map(([type, v]) => ({
+        type,
+        ...v,
+        grandTotal: v.totalFees + v.totalTax,
+      })),
+      byAccountType: Object.entries(byAccountType).map(([accountType, v]) => ({
+        accountType,
+        ...v,
+        grandTotal: v.totalFees + v.totalTax,
+      })),
+      details,
+    };
   }
 }

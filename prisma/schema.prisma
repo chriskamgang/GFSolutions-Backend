@@ -307,6 +307,9 @@ model Client {
   contactUrgenceLien  String?
   companyId       String?
   company         Company?        @relation(fields: [companyId], references: [id])
+  employerClientId String?
+  employerClient   Client?         @relation("EmployerEmployees", fields: [employerClientId], references: [id])
+  employees        Client[]        @relation("EmployerEmployees")
 
   // === Personne Morale ===
   raisonSociale       String?
@@ -321,6 +324,7 @@ model Client {
   partnerUserId       String?         // ID utilisateur chez le partenaire
   kycReminderSentAt   DateTime?       // derniere date d'envoi rappel documents
   kycReminderCount    Int             @default(0) // nombre de rappels envoyes
+  isTest              Boolean         @default(false)
 
   // === Relations ===
   accounts        Account[]
@@ -333,6 +337,7 @@ model Client {
   paymentRequests PaymentRequest[]
   solidarityMemberships SolidarityGroupMember[]
   amlAlerts       AmlAlert[]
+  salaryBatches   SalaryBatch[]   @relation("EmployerSalaryBatches")
 
   @@map("clients")
 }
@@ -363,7 +368,7 @@ model AccountProduct {
   id                  String   @id @default(uuid())
   code                String   @unique
   name                String
-  type                String   // CURRENT, SAVINGS, DAT, COLLECTE
+  type                String   // CURRENT, SAVINGS, DAT, SALARY, JOINT, ASSOCIATIF, INSTITUTIONNEL, COLLECTE, SCOLARITE
   description         String?
   interestRate        Decimal  @default(0) @db.Decimal(5, 2)
   minOpeningDeposit   Decimal  @default(0) @db.Decimal(15, 0)
@@ -402,14 +407,16 @@ model Account {
   maturityDate  DateTime?
   managerId     String?
   currency      String        @default("XAF")
+  phoneNumbers  Json?         // Liste de numeros associes au compte ["237670000000", "237690000000"]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  transactionsFrom Transaction[] @relation("FromAccount")
-  transactionsTo   Transaction[] @relation("ToAccount")
-  checkbooks       Checkbook[]
-  billPayments     BillPayment[]
-  merchantAccounts Merchant[]
+  transactionsFrom    Transaction[] @relation("FromAccount")
+  transactionsTo      Transaction[] @relation("ToAccount")
+  checkbooks          Checkbook[]
+  billPayments        BillPayment[]
+  merchantAccounts    Merchant[]
+  currencySubAccounts CurrencySubAccount[]
 
   @@map("accounts")
 }
@@ -896,8 +903,11 @@ model FeeConfig {
   name            String
   transactionType String   // DEPOSIT, WITHDRAWAL, TRANSFER, EXTERNAL_TRANSFER
   channel         String   @default("ALL") // ALL, CASH, ORANGE_MONEY, MTN_MOMO, EXPRESS_UNION
+  accountType     String   @default("ALL") // ALL, CURRENT, SAVINGS, SALARY, DAT, JOINT, etc.
   feeType         String   @default("PERCENTAGE") // PERCENTAGE or FIXED
   feeValue        Decimal  @db.Decimal(15, 2) // ex: 1.00 for 1%, or 500 for fixed 500 FCFA
+  minAmount       Decimal  @default(0) @db.Decimal(15, 0) // tranche min (0 = pas de min)
+  maxAmount       Decimal  @default(0) @db.Decimal(15, 0) // tranche max (0 = illimite)
   minFee          Decimal  @default(0) @db.Decimal(15, 0)
   maxFee          Decimal  @default(0) @db.Decimal(15, 0) // 0 = no max
   taxRate         Decimal  @default(19.25) @db.Decimal(5, 2) // TVA rate
@@ -905,7 +915,6 @@ model FeeConfig {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  @@unique([transactionType, channel])
   @@map("fee_configs")
 }
 
@@ -969,8 +978,10 @@ model Company {
 
 model SalaryBatch {
   id            String    @id @default(uuid())
-  companyId     String
-  company       Company   @relation(fields: [companyId], references: [id])
+  companyId     String?
+  company       Company?  @relation(fields: [companyId], references: [id])
+  employerClientId String?
+  employerClient   Client?  @relation("EmployerSalaryBatches", fields: [employerClientId], references: [id])
   reference     String    @unique
   totalAmount   Decimal   @db.Decimal(15, 0)
   totalEmployees Int
@@ -983,6 +994,7 @@ model SalaryBatch {
   payments      SalaryPayment[]
 
   @@index([companyId])
+  @@index([employerClientId])
   @@map("salary_batches")
 }
 
@@ -1376,4 +1388,64 @@ model AmlAlert {
   @@index([riskLevel])
   @@index([createdAt])
   @@map("aml_alerts")
+}
+
+// ==================== DEVISES (MULTI-DEVISES) ====================
+
+model Currency {
+  id          String   @id @default(uuid())
+  code        String   @unique // XAF, EUR, USD, GBP, NGN
+  name        String   // Franc CFA, Euro, Dollar US, etc.
+  symbol      String   // FCFA, €, $, £, ₦
+  decimals    Int      @default(0) // 0 pour XAF, 2 pour EUR/USD
+  isDefault   Boolean  @default(false) // XAF = true
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ratesFrom   ExchangeRate[] @relation("RateFrom")
+  ratesTo     ExchangeRate[] @relation("RateTo")
+  subAccounts CurrencySubAccount[]
+
+  @@map("currencies")
+}
+
+model ExchangeRate {
+  id              String   @id @default(uuid())
+  fromCurrencyId  String
+  fromCurrency    Currency @relation("RateFrom", fields: [fromCurrencyId], references: [id])
+  toCurrencyId    String
+  toCurrency      Currency @relation("RateTo", fields: [toCurrencyId], references: [id])
+  rate            Decimal  @db.Decimal(15, 6) // 1 EUR = 655.957 XAF
+  buyRate         Decimal? @db.Decimal(15, 6) // taux achat (EMF achete la devise)
+  sellRate        Decimal? @db.Decimal(15, 6) // taux vente (EMF vend la devise)
+  feePercentage   Decimal  @default(1.5) @db.Decimal(5, 2) // frais de conversion %
+  validFrom       DateTime @default(now())
+  validUntil      DateTime?
+  isActive        Boolean  @default(true)
+  source          String   @default("MANUAL") // MANUAL, API
+  createdById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([fromCurrencyId, toCurrencyId, validFrom])
+  @@index([fromCurrencyId, toCurrencyId])
+  @@index([isActive])
+  @@map("exchange_rates")
+}
+
+model CurrencySubAccount {
+  id            String   @id @default(uuid())
+  accountId     String
+  account       Account  @relation(fields: [accountId], references: [id])
+  currencyId    String
+  currency      Currency @relation(fields: [currencyId], references: [id])
+  balance       Decimal  @default(0) @db.Decimal(15, 2)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([accountId, currencyId])
+  @@index([accountId])
+  @@map("currency_sub_accounts")
 }

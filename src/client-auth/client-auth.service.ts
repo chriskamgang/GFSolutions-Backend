@@ -269,7 +269,7 @@ export class ClientAuthService {
   /**
    * Transactions du client
    */
-  async getMyTransactions(clientId: string, query: { limit?: number; page?: number; accountId?: string }) {
+  async getMyTransactions(clientId: string, query: { limit?: number; page?: number; accountId?: string; type?: string }) {
     const limit = query.limit || 20;
     const page = query.page || 1;
     const skip = (page - 1) * limit;
@@ -293,6 +293,10 @@ export class ClientAuthService {
         { fromAccountId: query.accountId },
         { toAccountId: query.accountId },
       ];
+    }
+
+    if (query.type) {
+      where.type = query.type;
     }
 
     const [data, total] = await Promise.all([
@@ -384,6 +388,22 @@ export class ClientAuthService {
   }
 
   /**
+   * Rechercher un compte par numéro (pour virement tiers)
+   */
+  async accountLookup(accountNumber: string) {
+    const account = await this.prisma.account.findFirst({
+      where: { accountNumber, status: 'ACTIVE' },
+      include: { client: { select: { firstName: true, lastName: true } } },
+    });
+    if (!account) throw new NotFoundException('Compte introuvable ou inactif');
+    return {
+      accountNumber: account.accountNumber,
+      name: `${account.client.firstName} ${account.client.lastName}`.trim(),
+      type: account.type,
+    };
+  }
+
+  /**
    * Virement GFS entre comptes (initié par le client en ligne)
    */
   async transfer(
@@ -407,6 +427,12 @@ export class ClientAuthService {
     });
     if (!toAccount) throw new NotFoundException('Compte destinataire introuvable ou inactif');
     if (toAccount.id === fromAccount.id) throw new BadRequestException('Le compte source et destinataire sont identiques');
+
+    // Bloquer les transferts d'un compte test vers un client reel
+    const client = await this.prisma.client.findUnique({ where: { id: clientId }, select: { isTest: true } });
+    if (client?.isTest && toAccount.clientId !== clientId) {
+      throw new BadRequestException('Compte de demonstration : les transferts vers d\'autres clients ne sont pas autorises.');
+    }
 
     const reference = 'VIR' + Date.now() + Math.random().toString(36).substr(2, 4).toUpperCase();
 

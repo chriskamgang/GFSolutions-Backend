@@ -285,6 +285,55 @@ export class SettingsService {
     return { success: true, message: 'Configuration KPay sauvegardee' };
   }
 
+  // ==================== ELGIOPAY (Paiement factures) ====================
+
+  async getElgioPayConfig() {
+    const settings = await this.prisma.setting.findMany({ where: { category: 'elgiopay' } });
+    const map: Record<string, string> = {};
+    for (const s of settings) map[s.key] = s.value;
+    const mode = map['elgiopay_mode'] || 'sandbox';
+    return {
+      secretTokenConfigured: mode === 'production' ? !!map['elgiopay_live_secret_token'] : !!map['elgiopay_secret_token'],
+      liveKeyConfigured: !!map['elgiopay_live_secret_token'],
+      sandboxKeyConfigured: !!map['elgiopay_secret_token'],
+      baseUrl: mode === 'production'
+        ? (map['elgiopay_base_url'] || 'https://api.elgiopay.com')
+        : (map['elgiopay_base_url'] || 'https://sandbox-api.elgiopay.com'),
+      enabled: map['elgiopay_enabled'] !== 'false',
+      mode,
+      webhookSecretConfigured: !!map['elgiopay_webhook_secret'],
+    };
+  }
+
+  async saveElgioPayConfig(data: {
+    secretToken?: string;
+    baseUrl?: string;
+    enabled?: boolean;
+    mode?: string;
+    webhookSecret?: string;
+  }) {
+    const upserts: any[] = [];
+
+    const upsert = (key: string, value: string, desc: string) =>
+      this.prisma.setting.upsert({ where: { key }, update: { value }, create: { key, value, category: 'elgiopay', description: desc } });
+
+    if (data.secretToken) {
+      // Detecter automatiquement si c'est une cle live ou sandbox
+      if (data.secretToken.startsWith('sk_live_') || data.secretToken.startsWith('pk_live_')) {
+        upserts.push(upsert('elgiopay_live_secret_token', data.secretToken, 'Token secret ElgioPay Production'));
+      } else {
+        upserts.push(upsert('elgiopay_secret_token', data.secretToken, 'Token secret ElgioPay Sandbox'));
+      }
+    }
+    if (data.baseUrl) upserts.push(upsert('elgiopay_base_url', data.baseUrl, 'URL de base ElgioPay API'));
+    if (data.enabled !== undefined) upserts.push(upsert('elgiopay_enabled', data.enabled ? 'true' : 'false', 'ElgioPay actif'));
+    if (data.mode) upserts.push(upsert('elgiopay_mode', data.mode, 'Mode ElgioPay (sandbox ou production)'));
+    if (data.webhookSecret) upserts.push(upsert('elgiopay_webhook_secret', data.webhookSecret, 'Secret de signature webhook ElgioPay'));
+
+    if (upserts.length > 0) await Promise.all(upserts);
+    return { success: true, message: 'Configuration ElgioPay sauvegardee' };
+  }
+
   // ==================== BACKUP / RESTAURATION ====================
 
   async listBackups() {

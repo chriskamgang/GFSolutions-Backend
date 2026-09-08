@@ -160,6 +160,41 @@ export class CreateClientDto {
 
   @ApiProperty({ required: false })
   @IsOptional()
+  @IsString()
+  nomPere?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  nomMere?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  contactUrgenceNom?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  contactUrgencePhone?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  contactUrgenceLien?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  arrondissement?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  planLocalisation?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
   @IsUUID()
   companyId?: string;
 

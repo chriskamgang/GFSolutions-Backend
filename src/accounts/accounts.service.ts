@@ -1,22 +1,39 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SmsService } from '../sms/sms.service';
 
 @Injectable()
 export class AccountsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private smsService: SmsService,
+  ) {}
 
-  // Generer un numero de compte : CodeAgence-CodeProduit-Chrono
+  // Generer un numero de compte : 11 chiffres (2 agence + 2 type + 7 chrono)
   private async generateAccountNumber(agencyId: string, productCode: string): Promise<string> {
     const agency = await this.prisma.agency.findUnique({ where: { id: agencyId } });
-    const agencyCode = agency?.code || '001';
+    // Code agence en 2 chiffres (ex: "001" -> "01", "DLA" -> "01")
+    const rawCode = agency?.code || '01';
+    const agencyNum = rawCode.replace(/\D/g, '').padStart(2, '0').slice(-2) || '01';
 
-    // Compter les comptes existants pour ce produit dans cette agence
-    const count = await this.prisma.account.count({
-      where: { agencyId, product: { code: productCode } },
+    // Code type produit en 2 chiffres
+    const typeMap: Record<string, string> = { CC: '10', EP: '20', DAT: '30', SAL: '40', JT: '50', ASS: '60', INS: '70', SCO: '80' };
+    const typeNum = typeMap[productCode] || '10';
+
+    // Chrono sequentiel sur 7 chiffres (basé sur le dernier numéro existant)
+    const lastAccount = await this.prisma.account.findFirst({
+      where: { agencyId },
+      orderBy: { accountNumber: 'desc' },
+      select: { accountNumber: true },
     });
-    const chrono = (count + 1).toString().padStart(6, '0');
+    let nextNum = 1;
+    if (lastAccount?.accountNumber) {
+      const lastChrono = parseInt(lastAccount.accountNumber.slice(-7), 10);
+      nextNum = lastChrono + 1;
+    }
+    const chrono = nextNum.toString().padStart(7, '0');
 
-    return `${agencyCode}-${productCode}-${chrono}`;
+    return `${agencyNum}${typeNum}${chrono}`;
   }
 
   async getProducts(includeInactive = false) {
@@ -118,7 +135,8 @@ export class AccountsService {
     }
 
     const openingFees = Number(product.openingFees) || 0;
-    const minDeposit = Number(product.minOpeningDeposit) || 0;
+    // Compte salaire ou scolarite : pas de depot minimum obligatoire a l'ouverture
+    const minDeposit = (product.type === 'SALARY' || product.type === 'SCOLARITE') ? 0 : (Number(product.minOpeningDeposit) || 0);
 
     // Si depot initial demande, verifier qu'il couvre frais + depot minimum
     if (initialDeposit !== undefined && initialDeposit > 0) {
@@ -232,6 +250,19 @@ export class AccountsService {
       } catch { /* Silent si plan comptable pas encore configure */ }
     }
 
+    // Envoi SMS de confirmation d'ouverture de compte
+    try {
+      const client = account.client;
+      const phone = client.phone;
+      if (phone) {
+        const clientName = client.clientType === 'MORALE'
+          ? client.raisonSociale
+          : `${client.firstName} ${client.lastName}`;
+        const smsMsg = `Bonjour ${clientName}, votre ${product.name} N° ${accountNumber} a ete ouvert avec succes chez GFS.${netBalance > 0 ? ` Solde: ${netBalance.toLocaleString('fr-FR')} FCFA.` : ''} Merci de votre confiance. GFS`;
+        this.smsService.send(phone, smsMsg).catch(() => {});
+      }
+    } catch { /* Silent */ }
+
     return {
       account,
       product,
@@ -242,6 +273,29 @@ export class AccountsService {
     };
   }
 
+  async updatePhoneNumbers(accountId: string, phoneNumbers: string[]) {
+    const account = await this.prisma.account.findUnique({ where: { id: accountId } });
+    if (!account) throw new NotFoundException('Compte non trouve');
+
+    // Nettoyer les numeros (garder uniquement les chiffres, dedoublonner)
+    const cleaned = [...new Set(
+      phoneNumbers
+        .map(p => p.replace(/[^0-9+]/g, ''))
+        .filter(p => p.length >= 9)
+    )];
+
+    const updated = await this.prisma.account.update({
+      where: { id: accountId },
+      data: { phoneNumbers: cleaned },
+    });
+
+    return {
+      accountNumber: updated.accountNumber,
+      phoneNumbers: updated.phoneNumbers,
+      message: `${cleaned.length} numero(s) associe(s) au compte`,
+    };
+  }
+
   async createSavingsAccount(
     clientId: string,
     agencyId: string,
@@ -249,7 +303,7 @@ export class AccountsService {
   ) {
     return this.prisma.account.create({
       data: {
-        accountNumber: `SAV-${Date.now().toString().slice(-10)}`,
+        accountNumber: await this.generateAccountNumber(agencyId, 'EP'),
         clientId,
         agencyId,
         type: 'SAVINGS',
@@ -266,7 +320,7 @@ export class AccountsService {
   ) {
     return this.prisma.account.create({
       data: {
-        accountNumber: `DAT-${Date.now().toString().slice(-10)}`,
+        accountNumber: await this.generateAccountNumber(agencyId, 'DAT'),
         clientId,
         agencyId,
         type: 'DAT',

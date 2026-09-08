@@ -108,6 +108,16 @@ export class AccountsController {
     return this.accountsService.createAccount(body);
   }
 
+  @Patch(':id/phone-numbers')
+  @Permissions('ACCOUNTS:UPDATE')
+  @ApiOperation({ summary: 'Gerer les numeros de telephone associes au compte' })
+  updatePhoneNumbers(
+    @Param('id') id: string,
+    @Body() body: { phoneNumbers: string[] },
+  ) {
+    return this.accountsService.updatePhoneNumbers(id, body.phoneNumbers);
+  }
+
   @Post('savings')
   @Permissions('ACCOUNTS:CREATE')
   @ApiOperation({ summary: 'Creer un compte epargne' })

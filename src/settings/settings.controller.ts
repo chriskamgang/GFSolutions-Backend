@@ -13,6 +13,7 @@ import { ContributionFrequency } from '@prisma/client';
 import { SettingsService } from './settings.service';
 import { SmsService } from '../sms/sms.service';
 import { PawaPayService } from '../pawapay/pawapay.service';
+import { ElgioPayService } from '../bill-payments/elgiopay.service';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 
@@ -25,6 +26,7 @@ export class SettingsController {
     private settingsService: SettingsService,
     private smsService: SmsService,
     private kpayService: PawaPayService,
+    private elgioPayService: ElgioPayService,
   ) {}
 
   // ==================== GET ALL SETTINGS ====================
@@ -238,6 +240,31 @@ export class SettingsController {
     const result = await this.settingsService.saveKpayConfig(body);
     // Recharger la config KPay en memoire
     await this.kpayService.loadConfigFromDb();
+    return result;
+  }
+
+  // ==================== ELGIOPAY (Paiement factures) ====================
+
+  @Get('elgiopay')
+  @Permissions('SETTINGS:READ')
+  @ApiOperation({ summary: 'Lire la configuration ElgioPay' })
+  getElgioPayConfig() {
+    return this.settingsService.getElgioPayConfig();
+  }
+
+  @Post('elgiopay')
+  @Permissions('SETTINGS:UPDATE')
+  @ApiOperation({ summary: 'Sauvegarder la configuration ElgioPay' })
+  async saveElgioPayConfig(
+    @Body() body: {
+      secretToken?: string;
+      baseUrl?: string;
+      enabled?: boolean;
+      mode?: string;
+    },
+  ) {
+    const result = await this.settingsService.saveElgioPayConfig(body);
+    await this.elgioPayService.loadConfigFromDb();
     return result;
   }
 

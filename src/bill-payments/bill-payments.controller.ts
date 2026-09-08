@@ -1,5 +1,5 @@
 import { Controller, Post, Get, Patch, Body, Param, Query, UseGuards, HttpCode } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { BillPaymentsService, OPERATORS } from './bill-payments.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -16,6 +16,105 @@ export class BillPaymentsController {
   getOperators() {
     return Object.entries(OPERATORS).map(([key, label]) => ({ key, label }));
   }
+
+  // ========== ELGIOPAY ENDPOINTS ==========
+
+  @Get('elgiopay/status')
+  @ApiOperation({ summary: 'Verifier si ElgioPay est configure' })
+  getElgioPayStatus() {
+    return { configured: this.service.isElgioPayConfigured() };
+  }
+
+  @Get('elgiopay/services')
+  @ApiOperation({ summary: 'Lister les services de paiement ElgioPay (ENEO, CamWater, Canal+...)' })
+  @ApiQuery({ name: 'category', required: false, description: 'Categorie: electricity, water, tv' })
+  getElgioPayServices(@Query('category') category?: string) {
+    return this.service.getElgioPayServices(category);
+  }
+
+  @Get('elgiopay/lookup')
+  @ApiOperation({ summary: 'Rechercher une facture sur ElgioPay' })
+  @ApiQuery({ name: 'serviceCode', required: true })
+  @ApiQuery({ name: 'subscriberNumber', required: true })
+  lookupBill(
+    @Query('serviceCode') serviceCode: string,
+    @Query('subscriberNumber') subscriberNumber: string,
+  ) {
+    return this.service.lookupBill(serviceCode, subscriberNumber);
+  }
+
+  @Post('elgiopay/pay')
+  @ApiOperation({ summary: 'Payer une facture via ElgioPay (ENEO, CamWater, Canal+...)' })
+  payBillViaElgioPay(
+    @CurrentUser('sub') userId: string,
+    @Body() dto: {
+      serviceCode: string;
+      subscriberNumber: string;
+      amount: number;
+      operator: string;
+      payerName: string;
+      payerPhone?: string;
+      paymentMode: 'CASH' | 'ACCOUNT';
+      accountId?: string;
+      agencyId: string;
+      fees?: number;
+      notes?: string;
+    },
+  ) {
+    return this.service.payBillViaElgioPay(userId, dto);
+  }
+
+  @Get('elgiopay/balance')
+  @ApiOperation({ summary: 'Solde du compte ElgioPay' })
+  getElgioPayBalance() {
+    return this.service.getElgioPayBalance();
+  }
+
+  @Post('elgiopay/purge-sandbox')
+  @ApiOperation({ summary: 'Supprimer les donnees de test sandbox' })
+  purgeSandboxData(@CurrentUser('sub') userId: string) {
+    return this.service.purgeSandboxData(userId);
+  }
+
+  @Get('elgiopay/recharges')
+  @ApiOperation({ summary: 'Historique des recharges ElgioPay' })
+  getRechargeHistory(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.getRechargeHistory({
+      page: page ? parseInt(page) : undefined,
+      limit: limit ? parseInt(limit) : undefined,
+    });
+  }
+
+  @Post('elgiopay/recharge')
+  @ApiOperation({ summary: 'Recharger le compte ElgioPay via Mobile Money (MTN/Orange)' })
+  rechargeElgioPay(
+    @CurrentUser('sub') userId: string,
+    @Body() dto: {
+      amount: number;
+      customerPhone: string;
+      paymentMethod: 'mtn_mobile_money' | 'orange_money';
+      customerName?: string;
+    },
+  ) {
+    return this.service.rechargeElgioPay(userId, dto);
+  }
+
+  @Get('elgiopay/recharge/:transactionId')
+  @ApiOperation({ summary: 'Statut d\'une recharge ElgioPay' })
+  getRechargeStatus(@Param('transactionId') transactionId: string) {
+    return this.service.getRechargeStatus(transactionId);
+  }
+
+  @Post('elgiopay/recharge/:transactionId/verify')
+  @ApiOperation({ summary: 'Verifier une recharge ElgioPay' })
+  verifyRecharge(@Param('transactionId') transactionId: string) {
+    return this.service.verifyRecharge(transactionId);
+  }
+
+  // ========== EXISTING ENDPOINTS ==========
 
   @Get('kpis')
   @ApiOperation({ summary: 'KPIs globaux paiements factures' })

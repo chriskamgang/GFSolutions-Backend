@@ -387,6 +387,20 @@ async function main() {
       lockDurationMonths: 0,
       earlyWithdrawalPenalty: 0,
     },
+    {
+      code: 'SCO-001',
+      name: 'Compte Scolarite',
+      type: 'SCOLARITE',
+      description: 'Compte de collecte des frais d\'inscription et de scolarite. Ouverture gratuite, pas de frais de versement ni de retrait. Seuls les frais d\'entretien mensuels sont preleves.',
+      interestRate: 0,
+      minOpeningDeposit: 0,
+      openingFees: 0,
+      minBalance: 0,
+      maintenanceFees: 2000,
+      maintenanceFrequency: 'MONTHLY',
+      lockDurationMonths: 0,
+      earlyWithdrawalPenalty: 0,
+    },
   ];
 
   for (const product of accountProducts) {
@@ -397,7 +411,7 @@ async function main() {
     });
   }
 
-  console.log(`${accountProducts.length} produits de compte crees.`);
+  console.log(`${accountProducts.length} produits de compte crees (dont Compte Scolarite SCO-001).`);
   console.log('\n=== Initialisation terminee ===');
   console.log('Super Admin: admin@microfinance.cm / Admin@2024');
 }

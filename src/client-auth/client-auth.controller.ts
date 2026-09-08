@@ -89,11 +89,13 @@ export class ClientAuthController {
     @Query('limit') limit?: string,
     @Query('page') page?: string,
     @Query('accountId') accountId?: string,
+    @Query('type') type?: string,
   ) {
     return this.clientAuthService.getMyTransactions(clientId, {
       limit: limit ? parseInt(limit) : undefined,
       page: page ? parseInt(page) : undefined,
       accountId,
+      type,
     });
   }
 
@@ -114,6 +116,14 @@ export class ClientAuthController {
     @Query('limit') limit?: string,
   ) {
     return this.clientAuthService.getMyNotifications(clientId, limit ? parseInt(limit) : 30);
+  }
+
+  @Get('account-lookup/:accountNumber')
+  @UseGuards(AuthGuard('jwt-client'))
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Rechercher un compte GFS par numéro (pour virement)' })
+  accountLookup(@Param('accountNumber') accountNumber: string) {
+    return this.clientAuthService.accountLookup(accountNumber);
   }
 
   @Post('transfer')

@@ -77,6 +77,48 @@ export class TransactionsController {
     return this.transactionsService.getPendingExternalTransfers(agencyId);
   }
 
+  @Get('account/:accountId/statement')
+  @Permissions('TRANSACTIONS:READ')
+  @ApiOperation({ summary: 'Releve de compte mensuel (depot/retrait)' })
+  @ApiQuery({ name: 'year', required: true })
+  @ApiQuery({ name: 'month', required: true })
+  getAccountStatement(
+    @Param('accountId') accountId: string,
+    @Query('year') year: string,
+    @Query('month') month: string,
+  ) {
+    return this.transactionsService.getAccountStatement(
+      accountId,
+      parseInt(year),
+      parseInt(month),
+    );
+  }
+
+  @Get('account/:accountId/history')
+  @Permissions('TRANSACTIONS:READ')
+  @ApiOperation({ summary: 'Historique des transactions d\'un compte client' })
+  @ApiQuery({ name: 'type', required: false })
+  @ApiQuery({ name: 'startDate', required: false })
+  @ApiQuery({ name: 'endDate', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  getAccountHistory(
+    @Param('accountId') accountId: string,
+    @Query('type') type?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.transactionsService.getAccountHistory(accountId, {
+      type,
+      startDate,
+      endDate,
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 50,
+    });
+  }
+
   @Get()
   @Permissions('TRANSACTIONS:READ')
   @ApiOperation({ summary: 'Lister les transactions' })
@@ -154,6 +196,17 @@ export class TransactionsController {
   }
 
   // ==================== RECEIPT ====================
+
+  @Post(':id/reverse')
+  @Permissions('TRANSACTIONS:UPDATE')
+  @ApiOperation({ summary: 'Contre-passer une transaction (annulation comptable)' })
+  reverseTransaction(
+    @Param('id') id: string,
+    @Body() body: { reason: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.transactionsService.reverseTransaction(id, body.reason, user.sub);
+  }
 
   @Get(':id/receipt')
   @Permissions('TRANSACTIONS:READ')

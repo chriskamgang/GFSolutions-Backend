@@ -275,11 +275,11 @@ export class ClientsService {
 
   private validateCNIFormat(idDocumentNumber: string, idDocumentType: string): void {
     if (idDocumentType === 'CNI') {
-      // CNI camerounaise = 9 chiffres
-      const regex = /^\d{9}$/;
+      // CNI camerounaise = 9 caracteres (chiffres et/ou lettres)
+      const regex = /^[A-Za-z0-9]{9}$/;
       if (!regex.test(idDocumentNumber)) {
         throw new BadRequestException(
-          'Le numero de CNI doit contenir exactement 9 chiffres numeriques.',
+          'Le numero de CNI doit contenir exactement 9 caracteres alphanumeriques.',
         );
       }
     }

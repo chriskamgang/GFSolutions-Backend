@@ -33,6 +33,7 @@ import { PawaPayModule } from './pawapay/pawapay.module';
 import { PaymentGatewayModule } from './payment-gateway/payment-gateway.module';
 import { SolidarityGroupsModule } from './solidarity-groups/solidarity-groups.module';
 import { AmlModule } from './aml/aml.module';
+import { CurrenciesModule } from './currencies/currencies.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { AmlModule } from './aml/aml.module';
     PaymentGatewayModule,
     SolidarityGroupsModule,
     AmlModule,
+    CurrenciesModule,
   ],
   controllers: [AppController],
 })
