@@ -309,32 +309,22 @@ export class AccountingService implements OnModuleInit {
       }
     }
 
-    // Migrer les anciens comptes parents (10 "Caisse", 22 "Depots") vers PCEMF
-    const ancienCaisse10 = await this.prisma.accountPlan.findFirst({
-      where: { code: '10', name: 'Caisse' },
-    });
-    if (ancienCaisse10) {
-      const newCaisse = await this.prisma.accountPlan.findUnique({ where: { code: '5710' } });
-      if (newCaisse) {
+    // Migrer les ecritures orphelines sur comptes PCEMF classe 1/2 (anciennement caisse/depots)
+    // Le compte 10 (maintenant "Capital, parts sociales") peut avoir d'anciennes ecritures de caisse → 5710
+    // Le compte 22 (maintenant "Autres immob corporelles") peut avoir d'anciennes ecritures de depots → 3712
+    const orphanMappings = [
+      { fromCode: '10', toCode: '5710', label: 'Caisse → Caisse FCFA' },
+      { fromCode: '22', toCode: '3712', label: 'Depots → Comptes courants clients' },
+    ];
+    for (const m of orphanMappings) {
+      const fromAcc = await this.prisma.accountPlan.findUnique({ where: { code: m.fromCode } });
+      const toAcc = await this.prisma.accountPlan.findUnique({ where: { code: m.toCode } });
+      if (fromAcc && toAcc) {
         const updated = await this.prisma.journalEntry.updateMany({
-          where: { accountId: ancienCaisse10.id },
-          data: { accountId: newCaisse.id },
+          where: { accountId: fromAcc.id },
+          data: { accountId: toAcc.id },
         });
-        if (updated.count > 0) results.push(`MIGRE: 10 (Caisse) → 5710 (Caisse FCFA): ${updated.count} ecritures`);
-      }
-    }
-
-    const ancienDepots22 = await this.prisma.accountPlan.findFirst({
-      where: { code: '22', name: 'Depots de la clientele' },
-    });
-    if (ancienDepots22) {
-      const newDepots = await this.prisma.accountPlan.findUnique({ where: { code: '3712' } });
-      if (newDepots) {
-        const updated = await this.prisma.journalEntry.updateMany({
-          where: { accountId: ancienDepots22.id },
-          data: { accountId: newDepots.id },
-        });
-        if (updated.count > 0) results.push(`MIGRE: 22 (Depots clientele) → 3712 (Comptes courants clients): ${updated.count} ecritures`);
+        if (updated.count > 0) results.push(`MIGRE: ${m.fromCode} → ${m.toCode} (${m.label}): ${updated.count} ecritures`);
       }
     }
 
