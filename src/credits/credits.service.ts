@@ -352,7 +352,7 @@ export class CreditsService {
       });
     });
 
-    // Ecriture comptable automatique : Debit Credits (201/202/203) | Credit Comptes courants (221)
+    // Ecriture comptable PCEMF : Debit Credits (322/316/301) | Credit Comptes courants (3712)
     try {
       const agencyId = currentAccount.agencyId;
       if (agencyId) {
@@ -439,7 +439,7 @@ export class CreditsService {
       }
     });
 
-    // Ecriture comptable : Debit Comptes courants (221) | Credit Credits (201) + Interets (701)
+    // Ecriture comptable PCEMF : Debit Comptes courants (3712) | Credit Credits (322) + Interets (713)
     try {
       const agencyId = repayment.credit.client.accounts[0]?.agencyId;
       if (agencyId) {

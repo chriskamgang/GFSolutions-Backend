@@ -7,7 +7,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Permissions } from '../common/decorators/permissions.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
-@ApiTags('Comptabilite SYSCOHADA')
+@ApiTags('Comptabilite PCEMF COBAC')
 @ApiBearerAuth()
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('accounting')
@@ -15,10 +15,17 @@ export class AccountingController {
   constructor(private readonly accountingService: AccountingService) {}
 
   @Post('plan/seed')
-  @ApiOperation({ summary: 'Initialiser le plan comptable EMF SYSCOHADA' })
+  @ApiOperation({ summary: 'Initialiser le plan comptable PCEMF COBAC' })
   @Permissions('ACCOUNTING:CREATE')
   seedPlan() {
     return this.accountingService.seedAccountPlan();
+  }
+
+  @Post('plan/migrate-pcemf')
+  @ApiOperation({ summary: 'Migrer l\'ancien plan comptable vers le PCEMF COBAC (transfert ecritures + suppression anciens comptes)' })
+  @Permissions('ACCOUNTING:CREATE')
+  migrateToPCEMF() {
+    return this.accountingService.migrateToPCEMF();
   }
 
   @Get('plan')

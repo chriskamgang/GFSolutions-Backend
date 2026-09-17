@@ -209,11 +209,11 @@ export class SchedulerService {
           },
         });
 
-        // Ecriture comptable : Debit 601 (Interets sur depots) / Credit 222 (Comptes epargne)
+        // Ecriture comptable PCEMF : Debit 613 (Interets sur comptes sur livrets) / Credit 373 (Comptes sur livrets)
         await this.accountingService.createEntry({
           date: new Date(),
-          debitAccountCode: '601',
-          creditAccountCode: '222',
+          debitAccountCode: '613',
+          creditAccountCode: '373',
           amount: interestEarned,
           label: `Capitalisation interets epargne ${year} - ${account.accountNumber}`,
           reference: `CAP-${year}-${account.accountNumber}`,
@@ -298,11 +298,11 @@ export class SchedulerService {
             },
           });
 
-          // Ecriture comptable : Debit 222 (Comptes epargne) / Credit 702 (Commissions)
+          // Ecriture comptable PCEMF : Debit 373 (Comptes sur livrets) / Credit 720 (Commissions tenue de compte)
           await this.accountingService.createEntry({
             date: now,
-            debitAccountCode: '222',
-            creditAccountCode: '702',
+            debitAccountCode: '373',
+            creditAccountCode: '720',
             amount: fees,
             label: `Frais tenue compte - ${account.accountNumber}`,
             reference,

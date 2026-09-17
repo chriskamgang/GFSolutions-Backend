@@ -28,62 +28,218 @@ export class AccountingService implements OnModuleInit {
   // ==================== PLAN COMPTABLE EMF SYSCOHADA ====================
 
   async seedAccountPlan() {
+    // ============================================================
+    // PLAN COMPTABLE DES ETABLISSEMENTS DE MICROFINANCE (PCEMF)
+    // Norme COBAC / CEMAC — Janvier 2010
+    // ============================================================
     const accounts = [
-      // Classe 1 - Comptes de tresorerie et operations avec les IF
-      { code: '1', name: 'Tresorerie et operations avec les IF', type: 'ACTIF', level: 1 },
-      { code: '10', name: 'Caisse', type: 'ACTIF', level: 2, parentCode: '1' },
-      { code: '101', name: 'Caisse siege', type: 'ACTIF', level: 3, parentCode: '10' },
-      { code: '102', name: 'Caisse agences', type: 'ACTIF', level: 3, parentCode: '10' },
-      { code: '11', name: 'Banques et CCP', type: 'ACTIF', level: 2, parentCode: '1' },
-      { code: '111', name: 'Comptes bancaires', type: 'ACTIF', level: 3, parentCode: '11' },
-      { code: '12', name: 'Comptes de liaison', type: 'ACTIF', level: 2, parentCode: '1' },
+      // ==================== CLASSE 1 — CAPITAUX PERMANENTS ====================
+      { code: '1', name: 'Capitaux permanents', type: 'PASSIF', level: 1 },
+      { code: '10', name: 'Capital, parts sociales et dotations', type: 'PASSIF', level: 2, parentCode: '1' },
+      { code: '100', name: 'Parts sociales souscrites appelees', type: 'PASSIF', level: 3, parentCode: '10' },
+      { code: '101', name: 'Capital social', type: 'PASSIF', level: 3, parentCode: '10' },
+      { code: '102', name: 'Fonds de dotation', type: 'PASSIF', level: 3, parentCode: '10' },
+      { code: '104', name: 'Primes liees au capital et parts sociales', type: 'PASSIF', level: 3, parentCode: '10' },
+      { code: '11', name: 'Reserves', type: 'PASSIF', level: 2, parentCode: '1' },
+      { code: '111', name: 'Reserves legales', type: 'PASSIF', level: 3, parentCode: '11' },
+      { code: '112', name: 'Reserves obligatoires et reglementaires', type: 'PASSIF', level: 3, parentCode: '11' },
+      { code: '113', name: 'Reserves statutaires et contractuelles', type: 'PASSIF', level: 3, parentCode: '11' },
+      { code: '114', name: 'Reserves facultatives', type: 'PASSIF', level: 3, parentCode: '11' },
+      { code: '12', name: 'Report a nouveau', type: 'PASSIF', level: 2, parentCode: '1' },
+      { code: '121', name: 'Report a nouveau crediteur', type: 'PASSIF', level: 3, parentCode: '12' },
+      { code: '122', name: 'Report a nouveau debiteur', type: 'ACTIF', level: 3, parentCode: '12' },
+      { code: '13', name: 'Resultat net de l\'exercice', type: 'PASSIF', level: 2, parentCode: '1' },
+      { code: '131', name: 'Benefice de l\'exercice', type: 'PASSIF', level: 3, parentCode: '13' },
+      { code: '132', name: 'Perte de l\'exercice', type: 'ACTIF', level: 3, parentCode: '13' },
+      { code: '14', name: 'Provisions et reserves reglementees', type: 'PASSIF', level: 2, parentCode: '1' },
+      { code: '141', name: 'Provisions reglementees', type: 'PASSIF', level: 3, parentCode: '14' },
+      { code: '142', name: 'Reserves reglementees', type: 'PASSIF', level: 3, parentCode: '14' },
+      { code: '15', name: 'Subventions d\'investissement', type: 'PASSIF', level: 2, parentCode: '1' },
+      { code: '16', name: 'Fonds de financement et de garantie', type: 'PASSIF', level: 2, parentCode: '1' },
+      { code: '160', name: 'Fonds de solidarite reglementaire', type: 'PASSIF', level: 3, parentCode: '16' },
+      { code: '161', name: 'Fonds affectes sur ressources propres', type: 'PASSIF', level: 3, parentCode: '16' },
+      { code: '163', name: 'Fonds de garantie et assurance mutuels', type: 'PASSIF', level: 3, parentCode: '16' },
+      { code: '17', name: 'Emprunts obligataires', type: 'PASSIF', level: 2, parentCode: '1' },
+      { code: '18', name: 'Autres ressources permanentes', type: 'PASSIF', level: 2, parentCode: '1' },
+      { code: '181', name: 'Emprunts participatifs et dettes subordonnees', type: 'PASSIF', level: 3, parentCode: '18' },
+      { code: '185', name: 'Emprunts a long et moyen terme', type: 'PASSIF', level: 3, parentCode: '18' },
+      { code: '19', name: 'Provisions pour risques et charges', type: 'PASSIF', level: 2, parentCode: '1' },
+      { code: '190', name: 'Provision pour risques generaux', type: 'PASSIF', level: 3, parentCode: '19' },
+      { code: '191', name: 'Provisions pour charges', type: 'PASSIF', level: 3, parentCode: '19' },
 
-      // Classe 2 - Operations avec la clientele
-      { code: '2', name: 'Operations avec la clientele', type: 'ACTIF', level: 1 },
-      { code: '20', name: 'Credits a la clientele', type: 'ACTIF', level: 2, parentCode: '2' },
-      { code: '201', name: 'Credits a court terme', type: 'ACTIF', level: 3, parentCode: '20' },
-      { code: '202', name: 'Credits a moyen terme', type: 'ACTIF', level: 3, parentCode: '20' },
-      { code: '203', name: 'Credits a long terme', type: 'ACTIF', level: 3, parentCode: '20' },
-      { code: '21', name: 'Creances en souffrance', type: 'ACTIF', level: 2, parentCode: '2' },
-      { code: '22', name: 'Depots de la clientele', type: 'PASSIF', level: 2, parentCode: '2' },
-      { code: '221', name: 'Comptes courants', type: 'PASSIF', level: 3, parentCode: '22' },
-      { code: '222', name: 'Comptes d\'epargne', type: 'PASSIF', level: 3, parentCode: '22' },
-      { code: '223', name: 'Depots a terme (DAT)', type: 'PASSIF', level: 3, parentCode: '22' },
-      { code: '23', name: 'Provisions pour creances', type: 'PASSIF', level: 2, parentCode: '2' },
+      // ==================== CLASSE 2 — VALEURS IMMOBILISEES ====================
+      { code: '2', name: 'Valeurs immobilisees', type: 'ACTIF', level: 1 },
+      { code: '20', name: 'Frais et valeurs incorporelles immobilisees', type: 'ACTIF', level: 2, parentCode: '2' },
+      { code: '201', name: 'Frais immobilises', type: 'ACTIF', level: 3, parentCode: '20' },
+      { code: '202', name: 'Valeurs incorporelles immobilisees', type: 'ACTIF', level: 3, parentCode: '20' },
+      { code: '2024', name: 'Brevets, logiciels, licences', type: 'ACTIF', level: 4, parentCode: '202' },
+      { code: '21', name: 'Terrains', type: 'ACTIF', level: 2, parentCode: '2' },
+      { code: '211', name: 'Terrains en exploitation', type: 'ACTIF', level: 3, parentCode: '21' },
+      { code: '22', name: 'Autres immobilisations corporelles en service', type: 'ACTIF', level: 2, parentCode: '2' },
+      { code: '221', name: 'Immeubles d\'exploitation', type: 'ACTIF', level: 3, parentCode: '22' },
+      { code: '225', name: 'Materiel et mobilier d\'exploitation', type: 'ACTIF', level: 3, parentCode: '22' },
+      { code: '229', name: 'Autres immobilisations corporelles', type: 'ACTIF', level: 3, parentCode: '22' },
+      { code: '23', name: 'Autres immobilisations corporelles en cours', type: 'ACTIF', level: 2, parentCode: '2' },
+      { code: '25', name: 'Depots et cautionnements verses', type: 'ACTIF', level: 2, parentCode: '2' },
+      { code: '26', name: 'Titres de participation et immob. financieres', type: 'ACTIF', level: 2, parentCode: '2' },
+      { code: '28', name: 'Amortissements des valeurs immobilisees', type: 'ACTIF', level: 2, parentCode: '2' },
+      { code: '280', name: 'Amort. valeurs incorporelles immobilisees', type: 'ACTIF', level: 3, parentCode: '28' },
+      { code: '282', name: 'Amort. immobilisations corporelles', type: 'ACTIF', level: 3, parentCode: '28' },
+      { code: '29', name: 'Provisions pour depreciation valeurs immob.', type: 'PASSIF', level: 2, parentCode: '2' },
 
-      // Classe 3 - Immobilisations
-      { code: '3', name: 'Immobilisations', type: 'ACTIF', level: 1 },
-      { code: '31', name: 'Immobilisations incorporelles', type: 'ACTIF', level: 2, parentCode: '3' },
-      { code: '32', name: 'Immobilisations corporelles', type: 'ACTIF', level: 2, parentCode: '3' },
-      { code: '33', name: 'Amortissements', type: 'ACTIF', level: 2, parentCode: '3' },
+      // ==================== CLASSE 3 — OPERATIONS AVEC LA CLIENTELE ====================
+      { code: '3', name: 'Operations avec la clientele', type: 'ACTIF', level: 1 },
+      // Credits a long et moyen terme
+      { code: '30', name: 'Credits a long terme', type: 'ACTIF', level: 2, parentCode: '3' },
+      { code: '301', name: 'Credit LT a l\'investissement immobilier', type: 'ACTIF', level: 3, parentCode: '30' },
+      { code: '306', name: 'Credits LT a la consommation', type: 'ACTIF', level: 3, parentCode: '30' },
+      { code: '308', name: 'Autres credits LT', type: 'ACTIF', level: 3, parentCode: '30' },
+      { code: '31', name: 'Credits a moyen terme', type: 'ACTIF', level: 2, parentCode: '3' },
+      { code: '311', name: 'Credit MT a l\'investissement immobilier', type: 'ACTIF', level: 3, parentCode: '31' },
+      { code: '316', name: 'Credits MT a la consommation', type: 'ACTIF', level: 3, parentCode: '31' },
+      { code: '318', name: 'Autres credits MT', type: 'ACTIF', level: 3, parentCode: '31' },
+      // Credits a court terme
+      { code: '32', name: 'Credits a court terme', type: 'ACTIF', level: 2, parentCode: '3' },
+      { code: '322', name: 'Credits de tresorerie', type: 'ACTIF', level: 3, parentCode: '32' },
+      { code: '3222', name: 'Credits de tresorerie aux clients', type: 'ACTIF', level: 4, parentCode: '322' },
+      { code: '323', name: 'Credits a l\'equipement', type: 'ACTIF', level: 3, parentCode: '32' },
+      { code: '326', name: 'Credits a la consommation', type: 'ACTIF', level: 3, parentCode: '32' },
+      { code: '3261', name: 'Credits a la consommation aux clients', type: 'ACTIF', level: 4, parentCode: '326' },
+      { code: '328', name: 'Autres credits a CT', type: 'ACTIF', level: 3, parentCode: '32' },
+      { code: '329', name: 'Creances rattachees aux credits a CT', type: 'ACTIF', level: 3, parentCode: '32' },
+      // Creances en souffrance
+      { code: '33', name: 'Creances en souffrance', type: 'ACTIF', level: 2, parentCode: '3' },
+      { code: '331', name: 'Creances impayees', type: 'ACTIF', level: 3, parentCode: '33' },
+      { code: '332', name: 'Creances immobilisees', type: 'ACTIF', level: 3, parentCode: '33' },
+      { code: '335', name: 'Autres creances douteuses', type: 'ACTIF', level: 3, parentCode: '33' },
+      // Depots a regime special
+      { code: '35', name: 'Comptes de depots a regime special', type: 'PASSIF', level: 2, parentCode: '3' },
+      { code: '351', name: 'Bons de caisse', type: 'PASSIF', level: 3, parentCode: '35' },
+      { code: '352', name: 'Certificats de depots', type: 'PASSIF', level: 3, parentCode: '35' },
+      // Depots a terme
+      { code: '36', name: 'Comptes de depots a terme', type: 'PASSIF', level: 2, parentCode: '3' },
+      { code: '361', name: 'Depots a terme', type: 'PASSIF', level: 3, parentCode: '36' },
+      { code: '369', name: 'Dettes rattachees', type: 'PASSIF', level: 3, parentCode: '36' },
+      // Decouverts et comptes crediteurs a vue
+      { code: '37', name: 'Decouverts et comptes crediteurs a vue', type: 'PASSIF', level: 2, parentCode: '3' },
+      { code: '371', name: 'Comptes courants', type: 'PASSIF', level: 3, parentCode: '37' },
+      { code: '3712', name: 'Comptes courants clients', type: 'PASSIF', level: 4, parentCode: '371' },
+      { code: '373', name: 'Comptes sur livrets', type: 'PASSIF', level: 3, parentCode: '37' },
+      { code: '374', name: 'Depots de garantie', type: 'PASSIF', level: 3, parentCode: '37' },
+      // Autres comptes de la clientele
+      { code: '38', name: 'Autres comptes de la clientele', type: 'PASSIF', level: 2, parentCode: '3' },
+      { code: '381', name: 'Dispositions a payer', type: 'PASSIF', level: 3, parentCode: '38' },
+      { code: '382', name: 'Comptes bloques', type: 'PASSIF', level: 3, parentCode: '38' },
+      // Provisions pour depreciation comptes clientele
+      { code: '39', name: 'Provisions pour depreciation comptes clientele', type: 'PASSIF', level: 2, parentCode: '3' },
+      { code: '391', name: 'Prov. creances douteuses couv. garantie Etat', type: 'PASSIF', level: 3, parentCode: '39' },
+      { code: '393', name: 'Prov. autres creances douteuses', type: 'PASSIF', level: 3, parentCode: '39' },
 
-      // Classe 4 - Capitaux permanents et divers
-      { code: '4', name: 'Capitaux permanents et divers', type: 'PASSIF', level: 1 },
-      { code: '40', name: 'Capital social', type: 'PASSIF', level: 2, parentCode: '4' },
-      { code: '41', name: 'Reserves', type: 'PASSIF', level: 2, parentCode: '4' },
-      { code: '42', name: 'Report a nouveau', type: 'PASSIF', level: 2, parentCode: '4' },
-      { code: '43', name: 'Resultat de l\'exercice', type: 'PASSIF', level: 2, parentCode: '4' },
-      { code: '44', name: 'Fournisseurs et dettes', type: 'PASSIF', level: 2, parentCode: '4' },
-      { code: '45', name: 'Etat et organismes', type: 'PASSIF', level: 2, parentCode: '4' },
-      { code: '451', name: 'TVA collectee', type: 'PASSIF', level: 3, parentCode: '45' },
-      { code: '452', name: 'TVA deductible', type: 'ACTIF', level: 3, parentCode: '45' },
+      // ==================== CLASSE 4 — COMPTES DE TIERS ET DE REGULARISATION ====================
+      { code: '4', name: 'Comptes de tiers et de regularisation', type: 'PASSIF', level: 1 },
+      { code: '40', name: 'Fournisseurs', type: 'PASSIF', level: 2, parentCode: '4' },
+      { code: '401', name: 'Fournisseurs, dettes en compte', type: 'PASSIF', level: 3, parentCode: '40' },
+      { code: '42', name: 'Personnel', type: 'PASSIF', level: 2, parentCode: '4' },
+      { code: '421', name: 'Acomptes et avances sur traitement', type: 'ACTIF', level: 3, parentCode: '42' },
+      { code: '422', name: 'Remunerations dues', type: 'PASSIF', level: 3, parentCode: '42' },
+      { code: '43', name: 'Etat, collectivites publiques', type: 'PASSIF', level: 2, parentCode: '4' },
+      { code: '430', name: 'Etat, impots et taxes', type: 'PASSIF', level: 3, parentCode: '43' },
+      { code: '4301', name: 'Etat, impot sur le benefice', type: 'PASSIF', level: 4, parentCode: '430' },
+      { code: '4303', name: 'Etat, TVA facturee', type: 'PASSIF', level: 4, parentCode: '430' },
+      { code: '4304', name: 'Etat, TVA due ou credit de TVA', type: 'PASSIF', level: 4, parentCode: '430' },
+      { code: '4305', name: 'Etat, TVA deductible', type: 'ACTIF', level: 4, parentCode: '430' },
+      { code: '4306', name: 'Etat, autres impots sur le CA', type: 'PASSIF', level: 4, parentCode: '430' },
+      { code: '44', name: 'Societaires et actionnaires', type: 'PASSIF', level: 2, parentCode: '4' },
+      { code: '441', name: 'Societaires et actionnaires, operations capital', type: 'PASSIF', level: 3, parentCode: '44' },
+      { code: '45', name: 'Comptes de liaison', type: 'PASSIF', level: 2, parentCode: '4' },
+      { code: '451', name: 'Siege et agences locales', type: 'PASSIF', level: 3, parentCode: '45' },
+      { code: '452', name: 'Comptes de liaison entre agences', type: 'PASSIF', level: 3, parentCode: '45' },
+      { code: '46', name: 'Autres debiteurs et crediteurs', type: 'PASSIF', level: 2, parentCode: '4' },
+      { code: '47', name: 'Comptes de regularisation', type: 'PASSIF', level: 2, parentCode: '4' },
+      { code: '471', name: 'Comptes de regularisation actif', type: 'ACTIF', level: 3, parentCode: '47' },
+      { code: '472', name: 'Comptes de regularisation passif', type: 'PASSIF', level: 3, parentCode: '47' },
+      { code: '49', name: 'Provisions pour depreciation comptes de tiers', type: 'PASSIF', level: 2, parentCode: '4' },
 
-      // Classe 6 - Charges
+      // ==================== CLASSE 5 — TRESORERIE ET OPERATIONS INTERBANCAIRES ====================
+      { code: '5', name: 'Tresorerie et operations interbancaires', type: 'ACTIF', level: 1 },
+      { code: '51', name: 'Titres de placement et de transaction', type: 'ACTIF', level: 2, parentCode: '5' },
+      { code: '52', name: 'Marche monetaire', type: 'ACTIF', level: 2, parentCode: '5' },
+      { code: '56', name: 'Comptes a vue des correspondants', type: 'ACTIF', level: 2, parentCode: '5' },
+      { code: '560', name: 'Comptes a vue nostri', type: 'ACTIF', level: 3, parentCode: '56' },
+      { code: '561', name: 'Comptes a vue lori', type: 'PASSIF', level: 3, parentCode: '56' },
+      { code: '57', name: 'Caisse', type: 'ACTIF', level: 2, parentCode: '5' },
+      { code: '571', name: 'Billets et monnaies', type: 'ACTIF', level: 3, parentCode: '57' },
+      { code: '5710', name: 'Caisse FCFA', type: 'ACTIF', level: 4, parentCode: '571' },
+      { code: '5711', name: 'Caisse devises', type: 'ACTIF', level: 4, parentCode: '571' },
+      { code: '58', name: 'Creances en souffrance sur les correspondants', type: 'ACTIF', level: 2, parentCode: '5' },
+      { code: '59', name: 'Provisions pour depreciation comptes tresorerie', type: 'PASSIF', level: 2, parentCode: '5' },
+
+      // ==================== CLASSE 6 — COMPTES DE CHARGES ====================
       { code: '6', name: 'Charges', type: 'CHARGE', level: 1 },
-      { code: '60', name: 'Charges d\'exploitation bancaire', type: 'CHARGE', level: 2, parentCode: '6' },
-      { code: '601', name: 'Interets sur depots', type: 'CHARGE', level: 3, parentCode: '60' },
-      { code: '61', name: 'Charges generales', type: 'CHARGE', level: 2, parentCode: '6' },
-      { code: '62', name: 'Charges de personnel', type: 'CHARGE', level: 2, parentCode: '6' },
-      { code: '63', name: 'Dotations amortissements', type: 'CHARGE', level: 2, parentCode: '6' },
-      { code: '64', name: 'Dotations aux provisions', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '60', name: 'Charges sur operations de tresorerie et interbancaires', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '601', name: 'Interets sur operations interbancaires', type: 'CHARGE', level: 3, parentCode: '60' },
+      { code: '606', name: 'Commissions sur operations de tresorerie', type: 'CHARGE', level: 3, parentCode: '60' },
+      { code: '61', name: 'Interets sur operations avec la clientele', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '611', name: 'Interets sur depots a regime special', type: 'CHARGE', level: 3, parentCode: '61' },
+      { code: '612', name: 'Interets sur depots a terme', type: 'CHARGE', level: 3, parentCode: '61' },
+      { code: '613', name: 'Interets sur comptes sur livrets', type: 'CHARGE', level: 3, parentCode: '61' },
+      { code: '614', name: 'Interets sur autres comptes a vue', type: 'CHARGE', level: 3, parentCode: '61' },
+      { code: '619', name: 'Interets sur autres comptes de la clientele', type: 'CHARGE', level: 3, parentCode: '61' },
+      { code: '62', name: 'Charges diverses sur operations bancaires', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '621', name: 'Frais sur instruments de paiement', type: 'CHARGE', level: 3, parentCode: '62' },
+      { code: '624', name: 'Commissions sur transfert de fonds', type: 'CHARGE', level: 3, parentCode: '62' },
+      { code: '63', name: 'Charges sur ressources permanentes', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '64', name: 'Charges liees aux activites accessoires', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '642', name: 'Charges sur operations de credit-bail', type: 'CHARGE', level: 3, parentCode: '64' },
+      { code: '65', name: 'Charges de personnel et charges generales', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '651', name: 'Charges de personnel', type: 'CHARGE', level: 3, parentCode: '65' },
+      { code: '652', name: 'Charges generales d\'exploitation', type: 'CHARGE', level: 3, parentCode: '65' },
+      { code: '66', name: 'Impots et taxes', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '661', name: 'Etat, impots et taxes directs', type: 'CHARGE', level: 3, parentCode: '66' },
+      { code: '662', name: 'Etat, impots et taxes indirects', type: 'CHARGE', level: 3, parentCode: '66' },
+      { code: '67', name: 'Pertes exceptionnelles et sur exercices anterieurs', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '68', name: 'Dotations aux amortissements', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '680', name: 'Dot. amort. frais et valeurs incorporelles', type: 'CHARGE', level: 3, parentCode: '68' },
+      { code: '682', name: 'Dot. amort. immobilisations corporelles', type: 'CHARGE', level: 3, parentCode: '68' },
+      { code: '69', name: 'Dotations aux provisions et pertes sur creances', type: 'CHARGE', level: 2, parentCode: '6' },
+      { code: '691', name: 'Dotations aux provisions', type: 'CHARGE', level: 3, parentCode: '69' },
+      { code: '6913', name: 'Dot. provisions depreciation comptes clientele', type: 'CHARGE', level: 4, parentCode: '691' },
+      { code: '692', name: 'Pertes sur creances irrecouvrables', type: 'CHARGE', level: 3, parentCode: '69' },
 
-      // Classe 7 - Produits
+      // ==================== CLASSE 7 — COMPTES DE PRODUITS ====================
       { code: '7', name: 'Produits', type: 'PRODUIT', level: 1 },
-      { code: '70', name: 'Produits d\'exploitation bancaire', type: 'PRODUIT', level: 2, parentCode: '7' },
-      { code: '701', name: 'Interets sur credits', type: 'PRODUIT', level: 3, parentCode: '70' },
-      { code: '702', name: 'Commissions et frais', type: 'PRODUIT', level: 3, parentCode: '70' },
-      { code: '703', name: 'Penalites de retard', type: 'PRODUIT', level: 3, parentCode: '70' },
-      { code: '71', name: 'Produits divers', type: 'PRODUIT', level: 2, parentCode: '7' },
+      { code: '70', name: 'Produits sur operations de tresorerie et interbancaire', type: 'PRODUIT', level: 2, parentCode: '7' },
+      { code: '701', name: 'Interets sur operations du marche monetaire', type: 'PRODUIT', level: 3, parentCode: '70' },
+      { code: '706', name: 'Commissions sur operations de tresorerie', type: 'PRODUIT', level: 3, parentCode: '70' },
+      { code: '71', name: 'Produits sur operations avec la clientele', type: 'PRODUIT', level: 2, parentCode: '7' },
+      { code: '711', name: 'Interets sur credits a long terme', type: 'PRODUIT', level: 3, parentCode: '71' },
+      { code: '712', name: 'Interets sur credits a moyen terme', type: 'PRODUIT', level: 3, parentCode: '71' },
+      { code: '713', name: 'Interets sur credits a court terme', type: 'PRODUIT', level: 3, parentCode: '71' },
+      { code: '714', name: 'Interets sur comptes debiteurs de la clientele', type: 'PRODUIT', level: 3, parentCode: '71' },
+      { code: '715', name: 'Commissions sur operations avec la clientele', type: 'PRODUIT', level: 3, parentCode: '71' },
+      { code: '7151', name: 'Commissions sur credits a long terme', type: 'PRODUIT', level: 4, parentCode: '715' },
+      { code: '7152', name: 'Commissions sur credits a moyen terme', type: 'PRODUIT', level: 4, parentCode: '715' },
+      { code: '7153', name: 'Commissions sur credits a court terme', type: 'PRODUIT', level: 4, parentCode: '715' },
+      { code: '719', name: 'Autres produits', type: 'PRODUIT', level: 3, parentCode: '71' },
+      { code: '72', name: 'Produits sur operations diverses', type: 'PRODUIT', level: 2, parentCode: '7' },
+      { code: '720', name: 'Commissions de tenue de compte', type: 'PRODUIT', level: 3, parentCode: '72' },
+      { code: '721', name: 'Commissions sur instruments de paiement', type: 'PRODUIT', level: 3, parentCode: '72' },
+      { code: '724', name: 'Commissions sur transfert de fonds', type: 'PRODUIT', level: 3, parentCode: '72' },
+      { code: '728', name: 'Produits sur moyens de paiements', type: 'PRODUIT', level: 3, parentCode: '72' },
+      { code: '75', name: 'Autres produits', type: 'PRODUIT', level: 2, parentCode: '7' },
+      { code: '755', name: 'Autres produits de la clientele ou societaires', type: 'PRODUIT', level: 3, parentCode: '75' },
+      { code: '76', name: 'Subventions d\'exploitation et d\'equilibre', type: 'PRODUIT', level: 2, parentCode: '7' },
+      { code: '77', name: 'Profits exceptionnels et sur exercices anterieurs', type: 'PRODUIT', level: 2, parentCode: '7' },
+      { code: '78', name: 'Reprises d\'amortissements', type: 'PRODUIT', level: 2, parentCode: '7' },
+      { code: '79', name: 'Reprises de provisions et recuperations', type: 'PRODUIT', level: 2, parentCode: '7' },
+      { code: '791', name: 'Reprises de provisions', type: 'PRODUIT', level: 3, parentCode: '79' },
+
+      // ==================== CLASSE 8 — SOLDES INTERMEDIAIRES DE GESTION ====================
+      { code: '8', name: 'Soldes intermediaires de gestion', type: 'PRODUIT', level: 1 },
+      { code: '80', name: 'Produit net financier (PNF)', type: 'PRODUIT', level: 2, parentCode: '8' },
+      { code: '82', name: 'Resultat d\'exploitation', type: 'PRODUIT', level: 2, parentCode: '8' },
+      { code: '85', name: 'Resultat avant impot', type: 'PRODUIT', level: 2, parentCode: '8' },
+      { code: '87', name: 'Resultat net avant certification', type: 'PRODUIT', level: 2, parentCode: '8' },
     ];
 
     let created = 0;
@@ -95,7 +251,125 @@ export class AccountingService implements OnModuleInit {
       });
       created++;
     }
-    return { message: `${created} comptes du plan comptable EMF crees` };
+    return { message: `${created} comptes du plan comptable PCEMF COBAC crees` };
+  }
+
+  /**
+   * Migration des anciens codes comptables vers le PCEMF COBAC.
+   * Transfere les ecritures existantes des anciens comptes vers les nouveaux,
+   * puis supprime les anciens comptes vides.
+   */
+  async migrateToPCEMF() {
+    const codeMapping: Record<string, string> = {
+      // Ancien code → Nouveau code PCEMF
+      // Classe 1 ancienne (Tresorerie) → Classe 5 PCEMF
+      // Note: '101' et '102' existent dans le nouveau plan (Capital social, Fonds de dotation)
+      // donc on ne les migre pas directement, on cree de nouveaux comptes caisse
+      // Classe 2 ancienne (Ops clientele) → Classe 3 PCEMF
+      '201': '322',   // Credits CT → Credits de tresorerie
+      '202': '316',   // Credits MT → Credits MT consommation
+      '203': '301',   // Credits LT → Credit LT investissement
+      '221': '3712',  // Comptes courants → Comptes courants clients
+      '222': '373',   // Comptes epargne → Comptes sur livrets
+      '223': '361',   // DAT → Depots a terme
+      // Classe 4 ancienne → Classe 1/4 PCEMF
+      '451': '4303',  // TVA collectee → TVA facturee
+      '452': '4305',  // TVA deductible → TVA deductible
+      // Classe 6 (Charges) — meme classe mais codes differents
+      '601': '614',   // Interets sur depots → Interets sur autres comptes a vue
+      '702': '715',   // Commissions et frais → Commissions operations clientele
+      '701': '713',   // Interets sur credits → Interets credits CT
+      '703': '719',   // Penalites de retard → Autres produits
+    };
+
+    const results: string[] = [];
+
+    // D'abord s'assurer que le nouveau plan PCEMF est cree
+    await this.seedAccountPlan();
+    results.push('Plan comptable PCEMF cree/verifie');
+
+    // Migrer les ecritures des anciens comptes vers les nouveaux
+    for (const [oldCode, newCode] of Object.entries(codeMapping)) {
+      const oldAccount = await this.prisma.accountPlan.findUnique({ where: { code: oldCode } });
+      const newAccount = await this.prisma.accountPlan.findUnique({ where: { code: newCode } });
+
+      if (!oldAccount || !newAccount) {
+        results.push(`SKIP: ${oldCode} → ${newCode} (compte introuvable)`);
+        continue;
+      }
+
+      // Transferer les ecritures
+      const updated = await this.prisma.journalEntry.updateMany({
+        where: { accountId: oldAccount.id },
+        data: { accountId: newAccount.id },
+      });
+
+      if (updated.count > 0) {
+        results.push(`MIGRE: ${oldCode} (${oldAccount.name}) → ${newCode} (${newAccount.name}): ${updated.count} ecritures`);
+      }
+    }
+
+    // Migrer les anciens comptes caisse (101/102/111 ancien plan) → nouveaux codes PCEMF
+    // On cherche par nom car les codes 101/102 existent aussi dans le PCEMF (Capital social)
+    const ancienCaisseSiege = await this.prisma.accountPlan.findFirst({
+      where: { code: '101', name: { contains: 'Caisse' } },
+    });
+    if (ancienCaisseSiege) {
+      // Ce compte 101 "Caisse siege" est l'ancien — migrer vers 5710
+      const newCaisse = await this.prisma.accountPlan.findUnique({ where: { code: '5710' } });
+      if (newCaisse) {
+        const updated = await this.prisma.journalEntry.updateMany({
+          where: { accountId: ancienCaisseSiege.id },
+          data: { accountId: newCaisse.id },
+        });
+        if (updated.count > 0) results.push(`MIGRE: 101 (Caisse siege) → 5710 (Caisse FCFA): ${updated.count} ecritures`);
+      }
+    }
+
+    const ancienCaisseAgence = await this.prisma.accountPlan.findFirst({
+      where: { code: '102', name: { contains: 'Caisse' } },
+    });
+    if (ancienCaisseAgence) {
+      const newCaisse = await this.prisma.accountPlan.findUnique({ where: { code: '5710' } });
+      if (newCaisse) {
+        const updated = await this.prisma.journalEntry.updateMany({
+          where: { accountId: ancienCaisseAgence.id },
+          data: { accountId: newCaisse.id },
+        });
+        if (updated.count > 0) results.push(`MIGRE: 102 (Caisse agences) → 5710 (Caisse FCFA): ${updated.count} ecritures`);
+      }
+    }
+
+    const ancienBanque = await this.prisma.accountPlan.findFirst({
+      where: { code: '111', name: { contains: 'bancaire' } },
+    });
+    if (ancienBanque) {
+      const newBanque = await this.prisma.accountPlan.findUnique({ where: { code: '560' } });
+      if (newBanque) {
+        const updated = await this.prisma.journalEntry.updateMany({
+          where: { accountId: ancienBanque.id },
+          data: { accountId: newBanque.id },
+        });
+        if (updated.count > 0) results.push(`MIGRE: 111 (Comptes bancaires) → 560 (Comptes a vue nostri): ${updated.count} ecritures`);
+      }
+    }
+
+    // Supprimer les anciens comptes qui n'ont plus d'ecritures et ne font pas partie du PCEMF
+    const oldOnlyCodes = ['12', '20', '21', '22', '23', '33', '40', '41', '42', '43', '44', '45',
+                           '60', '61', '62', '63', '64', '70', '71'];
+    for (const code of oldOnlyCodes) {
+      const acc = await this.prisma.accountPlan.findUnique({ where: { code } });
+      if (!acc) continue;
+      const entries = await this.prisma.journalEntry.count({ where: { accountId: acc.id } });
+      const children = await this.prisma.accountPlan.count({ where: { parentCode: code } });
+      if (entries === 0 && children === 0) {
+        await this.prisma.accountPlan.delete({ where: { code } });
+        results.push(`SUPPRIME: ${code} (${acc.name}) — ancien plan, aucune ecriture`);
+      }
+    }
+
+    this.logger.log(`Migration PCEMF terminee: ${results.length} operations`);
+    return { message: 'Migration vers PCEMF COBAC terminee', details: results };
   }
 
   async getAccountPlan() {
@@ -241,25 +515,25 @@ export class AccountingService implements OnModuleInit {
   }
 
   /**
-   * Ecriture auto pour un depot client
-   * Debit: 101 Caisse (ou 111 Banque si Mobile Money) | Credit: 221 Comptes courants
-   * + Debit: 221 Comptes courants (frais) | Credit: 702 Commissions
-   * + Debit: 702 -> Credit: 451 TVA
+   * Ecriture auto pour un depot client (PCEMF COBAC)
+   * Debit: 5710 Caisse FCFA (ou 560 Comptes a vue nostri si Mobile Money) | Credit: 3712 Comptes courants clients
+   * + Debit: 3712 (frais) | Credit: 715 Commissions sur operations clientele
+   * + Debit: 715 -> Credit: 4303 TVA facturee
    */
   async recordDeposit(agencyId: string, amount: number, fees: number, tax: number, reference: string, isMobileMoney: boolean) {
-    const debitCode = isMobileMoney ? '111' : '101';
+    const debitCode = isMobileMoney ? '560' : '5710';
     const entries: any[] = [];
 
     // Depot principal
     entries.push(await this.createEntry({
-      date: new Date(), debitAccountCode: debitCode, creditAccountCode: '221',
+      date: new Date(), debitAccountCode: debitCode, creditAccountCode: '3712',
       amount, label: `Depot client - ${reference}`, reference, sourceModule: 'TRANSACTION', agencyId,
     }));
 
     // Frais
     if (fees > 0) {
       entries.push(await this.createEntry({
-        date: new Date(), debitAccountCode: '221', creditAccountCode: '702',
+        date: new Date(), debitAccountCode: '3712', creditAccountCode: '715',
         amount: fees, label: `Frais depot - ${reference}`, reference, sourceModule: 'TRANSACTION', agencyId,
       }));
     }
@@ -267,7 +541,7 @@ export class AccountingService implements OnModuleInit {
     // TVA sur frais
     if (tax > 0) {
       entries.push(await this.createEntry({
-        date: new Date(), debitAccountCode: '702', creditAccountCode: '451',
+        date: new Date(), debitAccountCode: '715', creditAccountCode: '4303',
         amount: tax, label: `TVA sur frais - ${reference}`, reference, sourceModule: 'TRANSACTION', agencyId,
       }));
     }
@@ -276,28 +550,28 @@ export class AccountingService implements OnModuleInit {
   }
 
   /**
-   * Ecriture auto pour un retrait client
-   * Debit: 221 Comptes courants | Credit: 101 Caisse
+   * Ecriture auto pour un retrait client (PCEMF COBAC)
+   * Debit: 3712 Comptes courants clients | Credit: 5710 Caisse FCFA (ou 560 si MoMo)
    */
   async recordWithdrawal(agencyId: string, amount: number, fees: number, tax: number, reference: string, isMobileMoney: boolean) {
-    const creditCode = isMobileMoney ? '111' : '101';
+    const creditCode = isMobileMoney ? '560' : '5710';
     const entries: any[] = [];
 
     entries.push(await this.createEntry({
-      date: new Date(), debitAccountCode: '221', creditAccountCode: creditCode,
+      date: new Date(), debitAccountCode: '3712', creditAccountCode: creditCode,
       amount, label: `Retrait client - ${reference}`, reference, sourceModule: 'TRANSACTION', agencyId,
     }));
 
     if (fees > 0) {
       entries.push(await this.createEntry({
-        date: new Date(), debitAccountCode: '221', creditAccountCode: '702',
+        date: new Date(), debitAccountCode: '3712', creditAccountCode: '715',
         amount: fees, label: `Frais retrait - ${reference}`, reference, sourceModule: 'TRANSACTION', agencyId,
       }));
     }
 
     if (tax > 0) {
       entries.push(await this.createEntry({
-        date: new Date(), debitAccountCode: '702', creditAccountCode: '451',
+        date: new Date(), debitAccountCode: '715', creditAccountCode: '4303',
         amount: tax, label: `TVA sur frais - ${reference}`, reference, sourceModule: 'TRANSACTION', agencyId,
       }));
     }
@@ -306,33 +580,33 @@ export class AccountingService implements OnModuleInit {
   }
 
   /**
-   * Ecriture auto pour decaissement credit
-   * Debit: 201/202/203 Credits | Credit: 221 Comptes courants
+   * Ecriture auto pour decaissement credit (PCEMF COBAC)
+   * Debit: 322 Credits CT / 316 Credits MT / 301 Credits LT | Credit: 3712 Comptes courants clients
    */
   async recordCreditDisbursement(agencyId: string, amount: number, durationMonths: number, reference: string) {
-    const accountCode = durationMonths <= 12 ? '201' : durationMonths <= 36 ? '202' : '203';
+    const accountCode = durationMonths <= 12 ? '322' : durationMonths <= 36 ? '316' : '301';
     return this.createEntry({
-      date: new Date(), debitAccountCode: accountCode, creditAccountCode: '221',
+      date: new Date(), debitAccountCode: accountCode, creditAccountCode: '3712',
       amount, label: `Decaissement credit - ${reference}`, reference, sourceModule: 'CREDIT', agencyId,
     });
   }
 
   /**
-   * Ecriture auto pour remboursement credit
-   * Debit: 221 Comptes courants | Credit: 201 Credits (capital)
-   * Debit: 221 Comptes courants | Credit: 701 Interets sur credits
+   * Ecriture auto pour remboursement credit (PCEMF COBAC)
+   * Debit: 3712 Comptes courants clients | Credit: 322 Credits CT (capital)
+   * Debit: 3712 Comptes courants clients | Credit: 713 Interets sur credits CT
    */
   async recordCreditRepayment(agencyId: string, principal: number, interest: number, reference: string) {
     const entries: any[] = [];
     if (principal > 0) {
       entries.push(await this.createEntry({
-        date: new Date(), debitAccountCode: '221', creditAccountCode: '201',
+        date: new Date(), debitAccountCode: '3712', creditAccountCode: '322',
         amount: principal, label: `Remboursement capital - ${reference}`, reference, sourceModule: 'CREDIT', agencyId,
       }));
     }
     if (interest > 0) {
       entries.push(await this.createEntry({
-        date: new Date(), debitAccountCode: '221', creditAccountCode: '701',
+        date: new Date(), debitAccountCode: '3712', creditAccountCode: '713',
         amount: interest, label: `Interets credit - ${reference}`, reference, sourceModule: 'CREDIT', agencyId,
       }));
     }
@@ -417,9 +691,9 @@ export class AccountingService implements OnModuleInit {
   // ==================== JOURNAUX AUXILIAIRES ====================
 
   /**
-   * Journaux auxiliaires SYSCOHADA EMF
-   * CAISSE : ecritures impliquant comptes 101, 102
-   * BANQUE : ecritures impliquant compte 111
+   * Journaux auxiliaires PCEMF COBAC
+   * CAISSE : ecritures impliquant comptes 5710, 5711 (Classe 57 Caisse)
+   * BANQUE : ecritures impliquant compte 560 (Comptes a vue nostri)
    * OD : toutes les autres ecritures (operations diverses)
    */
   async getJournalAuxiliaire(params: {
@@ -429,12 +703,12 @@ export class AccountingService implements OnModuleInit {
   }) {
     const { type, page = 1, limit = 50, startDate, endDate } = params;
 
-    // Trouver les IDs des comptes caisse et banque
+    // Trouver les IDs des comptes caisse et banque (PCEMF)
     const caisseAccounts = await this.prisma.accountPlan.findMany({
-      where: { code: { in: ['101', '102'] } },
+      where: { code: { in: ['5710', '5711'] } },
     });
     const banqueAccounts = await this.prisma.accountPlan.findMany({
-      where: { code: { in: ['111'] } },
+      where: { code: { in: ['560'] } },
     });
 
     const caisseIds = caisseAccounts.map(a => a.id);
@@ -606,7 +880,7 @@ export class AccountingService implements OnModuleInit {
     // Ajouter le resultat au passif
     if (resultat !== 0) {
       passif.push({
-        code: '43', name: 'Resultat de l\'exercice', type: 'PASSIF',
+        code: '131', name: 'Resultat de l\'exercice', type: 'PASSIF',
         solde: resultat,
       });
       totalPassif += resultat;
@@ -703,12 +977,12 @@ export class AccountingService implements OnModuleInit {
       if (endDate) { const d = new Date(endDate); d.setHours(23, 59, 59, 999); periodWhere.date.lte = d; }
     }
 
-    // Tresorerie d'ouverture (solde comptes 10x, 11x AVANT la periode)
+    // Tresorerie d'ouverture (solde comptes 5710, 5711, 560 AVANT la periode)
     let tresorerieOuverture = 0;
     if (startDate) {
       const beforeWhere = { date: { lt: new Date(startDate) } };
       const tresoAccounts = await this.prisma.accountPlan.findMany({
-        where: { code: { in: ['101', '102', '111'] } },
+        where: { code: { in: ['5710', '5711', '560'] } },
       });
       for (const acc of tresoAccounts) {
         const agg = await this.prisma.journalEntry.aggregate({
@@ -720,19 +994,19 @@ export class AccountingService implements OnModuleInit {
     }
 
     // ---- EXPLOITATION ----
-    // Produits d'exploitation encaisses
-    const produitsExpl = await this.getAccountFlow(['701', '702', '703', '71'], periodWhere);
-    // Charges d'exploitation decaissees (flux negatif = sortie)
-    const chargesExpl = await this.getAccountFlow(['601', '61', '62'], periodWhere);
-    // Variation des depots clientele (hausse = entree de tresorerie)
-    const variationDepots = await this.getAccountFlow(['221', '222', '223'], periodWhere);
-    // Variation des credits (hausse credits = sortie de tresorerie, on inverse le signe)
-    const variationCreditsRaw = await this.getAccountFlow(['201', '202', '203'], periodWhere);
+    // Produits d'exploitation encaisses (PCEMF: 71x interets credits, 715 commissions, 719 autres)
+    const produitsExpl = await this.getAccountFlow(['713', '715', '719', '72'], periodWhere);
+    // Charges d'exploitation decaissees (PCEMF: 61x interets depots, 65x charges generales/personnel)
+    const chargesExpl = await this.getAccountFlow(['614', '651', '652'], periodWhere);
+    // Variation des depots clientele (PCEMF: 3712 comptes courants, 373 livrets, 361 DAT)
+    const variationDepots = await this.getAccountFlow(['3712', '373', '361'], periodWhere);
+    // Variation des credits (PCEMF: 322 CT, 316 MT, 301 LT)
+    const variationCreditsRaw = await this.getAccountFlow(['322', '316', '301'], periodWhere);
     const variationCredits = variationCreditsRaw.map(v => ({ ...v, flux: -v.flux }));
-    // Provisions et creances douteuses
-    const provisions = await this.getAccountFlow(['23', '21', '64'], periodWhere);
-    // TVA nette
-    const tva = await this.getAccountFlow(['451', '452'], periodWhere);
+    // Provisions et creances douteuses (PCEMF: 39x provisions clientele, 691 dotations provisions)
+    const provisions = await this.getAccountFlow(['39', '691'], periodWhere);
+    // TVA nette (PCEMF: 4303 TVA facturee, 4305 TVA deductible)
+    const tva = await this.getAccountFlow(['4303', '4305'], periodWhere);
 
     const exploitationDetails = [
       ...produitsExpl.map(p => ({ ...p, categorie: 'Produits encaisses' })),
@@ -745,12 +1019,14 @@ export class AccountingService implements OnModuleInit {
     const fluxExploitation = exploitationDetails.reduce((s, l) => s + l.flux, 0);
 
     // ---- INVESTISSEMENT ----
-    const investDetails = await this.getAccountFlow(['31', '32', '33'], periodWhere);
+    // PCEMF: 202 valeurs incorporelles, 225 materiel/mobilier, 282 amortissements
+    const investDetails = await this.getAccountFlow(['202', '225', '282'], periodWhere);
     const investissement = investDetails.map(i => ({ ...i, categorie: 'Immobilisations' }));
     const fluxInvestissement = investissement.reduce((s, l) => s + l.flux, 0);
 
     // ---- FINANCEMENT ----
-    const financementDetails = await this.getAccountFlow(['40', '41', '42'], periodWhere);
+    // PCEMF: 101 capital social, 111 reserves legales, 121 report a nouveau
+    const financementDetails = await this.getAccountFlow(['101', '111', '121'], periodWhere);
     const financement = financementDetails.map(f => ({ ...f, categorie: 'Capitaux propres' }));
     const fluxFinancement = financement.reduce((s, l) => s + l.flux, 0);
 
