@@ -45,10 +45,10 @@ export class ReportsService {
       this.prisma.credit.count({ where: { status: 'DEFAULTED' } }),
       this.prisma.credit.aggregate({ _sum: { amount: true }, where: { status: { in: ['DISBURSED', 'ACTIVE', 'COMPLETED'] } } }),
       this.prisma.credit.aggregate({ _sum: { remainingAmount: true }, where: { status: { in: ['DISBURSED', 'ACTIVE'] } } }),
-      this.prisma.transaction.aggregate({ _sum: { amount: true }, where: { type: 'DEPOSIT', status: 'COMPLETED', createdAt: { gte: startOfMonth } } }),
-      this.prisma.transaction.aggregate({ _sum: { amount: true }, where: { type: 'WITHDRAWAL', status: 'COMPLETED', createdAt: { gte: startOfMonth } } }),
-      this.prisma.transaction.aggregate({ _sum: { fees: true }, where: { status: 'COMPLETED', createdAt: { gte: startOfMonth } } }),
-      this.prisma.transaction.count({ where: { status: 'COMPLETED', createdAt: { gte: startOfMonth } } }),
+      this.prisma.transaction.aggregate({ _sum: { amount: true }, where: { type: 'DEPOSIT', status: 'COMPLETED', isTest: { not: true }, createdAt: { gte: startOfMonth } } as any }),
+      this.prisma.transaction.aggregate({ _sum: { amount: true }, where: { type: 'WITHDRAWAL', status: 'COMPLETED', isTest: { not: true }, createdAt: { gte: startOfMonth } } as any }),
+      this.prisma.transaction.aggregate({ _sum: { fees: true }, where: { status: 'COMPLETED', isTest: { not: true }, createdAt: { gte: startOfMonth } } as any }),
+      this.prisma.transaction.count({ where: { status: 'COMPLETED', isTest: { not: true }, createdAt: { gte: startOfMonth } } as any }),
     ]);
 
     // PAR > 30 jours

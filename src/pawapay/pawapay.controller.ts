@@ -89,6 +89,50 @@ export class PawaPayController {
     return this.kpayService.initiatePayout(body);
   }
 
+  // ==================== APP PAYOUT (TRAITEMENT MANUEL — sans auth) ====================
+
+  @Get('pending-payouts')
+  @ApiOperation({ summary: 'Liste des retraits Mobile Money en attente (app payout)' })
+  getPendingPayouts() {
+    return this.kpayService.getPendingPayouts();
+  }
+
+  @Post('confirm-payout/:id')
+  @ApiOperation({ summary: 'Confirmer un retrait Mobile Money (app payout)' })
+  confirmPayout(
+    @Param('id') id: string,
+    @Body() body: { operatorRef?: string },
+  ) {
+    return this.kpayService.confirmPayout(id, body.operatorRef);
+  }
+
+  @Post('reject-payout/:id')
+  @ApiOperation({ summary: 'Rejeter un retrait Mobile Money (app payout)' })
+  rejectPayout(
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.kpayService.rejectPayout(id, body.reason);
+  }
+
+  @Post('confirm-deposit/:id')
+  @ApiOperation({ summary: 'Confirmer un depot Mobile Money (app payout)' })
+  confirmDeposit(
+    @Param('id') id: string,
+    @Body() body: { operatorRef?: string },
+  ) {
+    return this.kpayService.confirmDeposit(id, body.operatorRef);
+  }
+
+  @Post('reject-deposit/:id')
+  @ApiOperation({ summary: 'Rejeter un depot Mobile Money (app payout)' })
+  rejectDeposit(
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.kpayService.rejectDeposit(id, body.reason);
+  }
+
   // ==================== SOLDE & RECHARGE MARCHAND ====================
 
   @Get('balance')

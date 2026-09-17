@@ -254,7 +254,7 @@ model Client {
   clientType      ClientType      @default(PHYSIQUE)
 
   // === Champs communs ===
-  phone           String          @unique
+  phone           String
   email           String?
   address         String
   city            String

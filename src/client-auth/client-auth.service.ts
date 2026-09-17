@@ -167,6 +167,31 @@ export class ClientAuthService {
 
     if (!client) throw new NotFoundException('Client non trouve');
 
+    // Comptes des PM dont le client est mandataire
+    const mandats = await this.prisma.mandataire.findMany({
+      where: { clientPhysiqueId: clientId },
+      select: { clientMoraleId: true, role: true },
+    });
+
+    let mandataireAccounts: any[] = [];
+    if (mandats.length > 0) {
+      const moraleIds = mandats.map((m) => m.clientMoraleId);
+      const moraleAccts = await this.prisma.account.findMany({
+        where: { clientId: { in: moraleIds }, status: 'ACTIVE' },
+        include: { client: { select: { raisonSociale: true, firstName: true, lastName: true } } },
+      });
+      mandataireAccounts = moraleAccts.map((a) => ({
+        id: a.id,
+        accountNumber: a.accountNumber,
+        type: a.type,
+        balance: a.balance,
+        status: a.status,
+        createdAt: a.createdAt,
+        ownerName: a.client?.raisonSociale || [a.client?.firstName, a.client?.lastName].filter(Boolean).join(' ') || null,
+        isMandataire: true,
+      }));
+    }
+
     return {
       id: client.id,
       clientNumber: client.clientNumber,
@@ -184,7 +209,10 @@ export class ClientAuthService {
       agencyId: client.agencyId,
       twoFactorEnabled: client.twoFactorEnabled,
       kycVerified: client.kycVerified,
-      accounts: client.accounts,
+      accounts: [
+        ...client.accounts.map((a) => ({ ...a, isMandataire: false })),
+        ...mandataireAccounts,
+      ],
       createdAt: client.createdAt,
     };
   }
@@ -260,10 +288,38 @@ export class ClientAuthService {
    * Comptes du client
    */
   async getMyAccounts(clientId: string) {
-    return this.prisma.account.findMany({
+    // Comptes propres du client
+    const ownAccounts = await this.prisma.account.findMany({
       where: { clientId, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Comptes des PM dont le client est mandataire
+    const mandats = await this.prisma.mandataire.findMany({
+      where: { clientPhysiqueId: clientId },
+      select: { clientMoraleId: true, role: true },
+    });
+
+    if (mandats.length > 0) {
+      const moraleIds = mandats.map((m) => m.clientMoraleId);
+      const moraleAccounts = await this.prisma.account.findMany({
+        where: { clientId: { in: moraleIds }, status: 'ACTIVE' },
+        include: { client: { select: { raisonSociale: true, firstName: true, lastName: true } } },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // Ajouter le nom du propriétaire sur chaque compte pour l'affichage
+      const enriched = moraleAccounts.map((a) => ({
+        ...a,
+        ownerName: a.client?.raisonSociale || [a.client?.firstName, a.client?.lastName].filter(Boolean).join(' ') || null,
+        isMandataire: true,
+        client: undefined,
+      }));
+
+      return [...ownAccounts.map((a) => ({ ...a, isMandataire: false })), ...enriched];
+    }
+
+    return ownAccounts.map((a) => ({ ...a, isMandataire: false }));
   }
 
   /**
@@ -274,12 +330,26 @@ export class ClientAuthService {
     const page = query.page || 1;
     const skip = (page - 1) * limit;
 
-    // Obtenir tous les comptes du client
+    // Obtenir tous les comptes du client + comptes mandataire
     const accounts = await this.prisma.account.findMany({
       where: { clientId },
       select: { id: true },
     });
     const accountIds = accounts.map((a) => a.id);
+
+    // Ajouter les comptes des PM dont le client est mandataire
+    const mandats = await this.prisma.mandataire.findMany({
+      where: { clientPhysiqueId: clientId },
+      select: { clientMoraleId: true },
+    });
+    if (mandats.length > 0) {
+      const moraleIds = mandats.map((m) => m.clientMoraleId);
+      const moraleAccounts = await this.prisma.account.findMany({
+        where: { clientId: { in: moraleIds } },
+        select: { id: true },
+      });
+      accountIds.push(...moraleAccounts.map((a) => a.id));
+    }
 
     const where: any = {
       OR: [
@@ -450,6 +520,7 @@ export class ClientAuthService {
           agencyId: fromAccount.agencyId,
           status: 'COMPLETED',
           description: dto.description || 'Virement GFS en ligne',
+          isTest: !!client?.isTest,
         },
       });
 

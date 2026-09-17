@@ -126,8 +126,6 @@ export class PawaPayService {
     description?: string;
     initiatedBy?: string;
   }) {
-    if (!this.apiKey) throw new BadRequestException('KPay non configure (KPAY_API_KEY manquant)');
-
     const account = await this.prisma.account.findUnique({
       where: { id: params.accountId },
       include: { client: true },
@@ -137,9 +135,6 @@ export class PawaPayService {
     if (params.amount < 50) throw new BadRequestException('Montant minimum : 50 FCFA');
 
     const provider = this.resolveProvider(params.provider);
-    if (this.enabledProviders.length > 0 && !this.enabledProviders.includes(provider)) {
-      throw new BadRequestException(`Operateur ${provider} non active. Contactez l'administrateur.`);
-    }
     const prismaProvider = PROVIDER_TO_PRISMA[provider] || PROVIDER_TO_PRISMA[params.provider] || 'MTN_MOMO';
     const externalId = `DEP-${uuidv4()}`;
     const reference = this.generateReference();
@@ -163,7 +158,23 @@ export class PawaPayService {
       },
     });
 
+    // MODE MANUEL : pas de KPay, l'app payout va traiter via USSD
+    if (this.isManualMode) {
+      this.logger.log(`[MANUAL] Depot en attente: ${reference} — ${params.amount} XAF — ${PROVIDER_DISPLAY[provider] || provider} — ${params.phone}`);
+      return {
+        success: true,
+        transactionId: transaction.id,
+        reference,
+        status: 'PENDING',
+        mode: 'manual',
+        message: 'Depot en attente de traitement par l\'operateur.',
+      };
+    }
+
     // Appel API KPay
+    if (this.enabledProviders.length > 0 && !this.enabledProviders.includes(provider)) {
+      throw new BadRequestException(`Operateur ${provider} non active. Contactez l'administrateur.`);
+    }
     try {
       const body = {
         amount: Math.round(params.amount),
@@ -219,6 +230,11 @@ export class PawaPayService {
 
   // ==================== RETRAIT (GFS envoie de l'argent au client) ====================
 
+  /** Verifie si le mode manuel est actif (pas de KPay, l'app payout gere les envois) */
+  get isManualMode(): boolean {
+    return !this.apiKey;
+  }
+
   async initiatePayout(params: {
     accountId: string;
     amount: number;
@@ -227,8 +243,6 @@ export class PawaPayService {
     agencyId: string;
     description?: string;
   }) {
-    if (!this.apiKey) throw new BadRequestException('KPay non configure (KPAY_API_KEY manquant)');
-
     const account = await this.prisma.account.findUnique({
       where: { id: params.accountId },
       include: { client: true },
@@ -239,9 +253,6 @@ export class PawaPayService {
     if (Number(account.balance) < params.amount) throw new BadRequestException('Solde insuffisant');
 
     const provider = this.resolveProvider(params.provider);
-    if (this.enabledProviders.length > 0 && !this.enabledProviders.includes(provider)) {
-      throw new BadRequestException(`Operateur ${provider} non active. Contactez l'administrateur.`);
-    }
     const prismaProvider = PROVIDER_TO_PRISMA[provider] || PROVIDER_TO_PRISMA[params.provider] || 'MTN_MOMO';
     const externalId = `WDR-${uuidv4()}`;
     const reference = this.generateReference();
@@ -269,6 +280,24 @@ export class PawaPayService {
         description: params.description || `Retrait Mobile Money ${PROVIDER_DISPLAY[provider] || provider}`,
       },
     });
+
+    // MODE MANUEL : pas de KPay, l'app payout va traiter
+    if (this.isManualMode) {
+      this.logger.log(`[MANUAL] Retrait en attente: ${reference} — ${params.amount} XAF — ${PROVIDER_DISPLAY[provider] || provider} — ${params.phone}`);
+      return {
+        success: true,
+        transactionId: transaction.id,
+        reference,
+        status: 'PENDING',
+        mode: 'manual',
+        message: 'Retrait en attente de traitement par l\'operateur.',
+      };
+    }
+
+    // MODE KPAY
+    if (this.enabledProviders.length > 0 && !this.enabledProviders.includes(provider)) {
+      throw new BadRequestException(`Operateur ${provider} non active. Contactez l'administrateur.`);
+    }
 
     try {
       const body = {
@@ -329,6 +358,204 @@ export class PawaPayService {
       });
       throw new BadRequestException('Erreur communication KPay: ' + err.message);
     }
+  }
+
+  // ==================== APP PAYOUT — ENDPOINTS MANUELS ====================
+
+  /**
+   * Liste des retraits et depots Mobile Money en attente (pour l'app payout)
+   */
+  async getPendingPayouts() {
+    return this.prisma.transaction.findMany({
+      where: {
+        status: 'PENDING',
+        type: 'WITHDRAWAL',
+        mobileMoneyProvider: { not: null },
+        mobileMoneyPhone: { not: null },
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+      include: {
+        fromAccount: {
+          select: { accountNumber: true, client: { select: { firstName: true, lastName: true, raisonSociale: true } } },
+        },
+        toAccount: {
+          select: { accountNumber: true, client: { select: { firstName: true, lastName: true, raisonSociale: true } } },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
+   * Confirmer qu'un retrait a ete envoye via USSD (l'app payout appelle apres envoi)
+   */
+  async confirmPayout(transactionId: string, operatorRef?: string) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: {
+        fromAccount: { include: { client: true } },
+      },
+    });
+
+    if (!transaction) throw new NotFoundException('Transaction non trouvee');
+    if (transaction.status !== 'PENDING') throw new BadRequestException('Cette transaction n\'est plus en attente');
+    if (transaction.type !== 'WITHDRAWAL') throw new BadRequestException('Ce n\'est pas un retrait');
+
+    // Marquer comme complete
+    await this.prisma.transaction.update({
+      where: { id: transactionId },
+      data: {
+        status: 'COMPLETED',
+        mobileMoneyRef: operatorRef || transaction.mobileMoneyRef,
+      },
+    });
+
+    // Ecriture comptable
+    try {
+      await this.accountingService.recordWithdrawal(
+        transaction.agencyId,
+        Number(transaction.amount),
+        Number(transaction.fees),
+        Number(transaction.tax),
+        transaction.reference,
+        true,
+      );
+    } catch (e) {
+      this.logger.warn(`[COMPTA] Echec ecriture retrait MM: ${e.message}`);
+    }
+
+    // Alertes SMS + WhatsApp
+    if (transaction.fromAccount?.client?.phone) {
+      const account = await this.prisma.account.findUnique({
+        where: { id: transaction.fromAccountId! },
+        select: { balance: true, accountNumber: true },
+      });
+      const phone = transaction.fromAccount.client.phone;
+      const accNum = account?.accountNumber || '';
+      const amt = Number(transaction.amount);
+      const bal = Number(account?.balance || 0);
+
+      this.smsService.sendWithdrawalAlert(phone, accNum, amt, bal).catch(() => {});
+      this.whatsappService.sendWithdrawalAlert(phone, accNum, amt, bal).catch(() => {});
+    }
+
+    this.logger.log(`[MANUAL] Retrait confirme: ${transaction.reference} — ${transaction.amount} XAF`);
+
+    return { success: true, message: 'Retrait confirme avec succes' };
+  }
+
+  /**
+   * Rejeter un retrait (rembourser le client)
+   */
+  async rejectPayout(transactionId: string, reason?: string) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+    });
+
+    if (!transaction) throw new NotFoundException('Transaction non trouvee');
+    if (transaction.status !== 'PENDING') throw new BadRequestException('Cette transaction n\'est plus en attente');
+
+    // Reverser le debit
+    if (transaction.fromAccountId) {
+      await this.prisma.account.update({
+        where: { id: transaction.fromAccountId },
+        data: { balance: { increment: Number(transaction.amount) } },
+      });
+    }
+
+    await this.prisma.transaction.update({
+      where: { id: transactionId },
+      data: { status: 'FAILED', description: `Rejete: ${reason || 'Annule par operateur'}` },
+    });
+
+    this.logger.log(`[MANUAL] Retrait rejete + rembourse: ${transaction.reference}`);
+
+    return { success: true, message: 'Retrait rejete et client rembourse' };
+  }
+
+  /**
+   * Confirmer qu'un depot a ete recu via USSD (l'app payout appelle apres cash-in)
+   */
+  async confirmDeposit(transactionId: string, operatorRef?: string) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: {
+        toAccount: { include: { client: true } },
+      },
+    });
+
+    if (!transaction) throw new NotFoundException('Transaction non trouvee');
+    if (transaction.status !== 'PENDING') throw new BadRequestException('Cette transaction n\'est plus en attente');
+    if (transaction.type !== 'DEPOSIT') throw new BadRequestException('Ce n\'est pas un depot');
+
+    // Crediter le compte
+    await this.prisma.account.update({
+      where: { id: transaction.toAccountId! },
+      data: { balance: { increment: Number(transaction.amount) } },
+    });
+
+    await this.prisma.transaction.update({
+      where: { id: transactionId },
+      data: {
+        status: 'COMPLETED',
+        mobileMoneyRef: operatorRef || transaction.mobileMoneyRef,
+      },
+    });
+
+    // Ecriture comptable
+    try {
+      await this.accountingService.recordDeposit(
+        transaction.agencyId,
+        Number(transaction.amount),
+        Number(transaction.fees),
+        Number(transaction.tax),
+        transaction.reference,
+        true,
+      );
+    } catch (e) {
+      this.logger.warn(`[COMPTA] Echec ecriture depot MM: ${e.message}`);
+    }
+
+    // Alertes SMS + WhatsApp
+    if (transaction.toAccount?.client?.phone) {
+      const account = await this.prisma.account.findUnique({
+        where: { id: transaction.toAccountId! },
+        select: { balance: true, accountNumber: true },
+      });
+      const phone = transaction.toAccount.client.phone;
+      const accNum = account?.accountNumber || '';
+      const amt = Number(transaction.amount);
+      const bal = Number(account?.balance || 0);
+
+      this.smsService.sendDepositAlert(phone, accNum, amt, bal).catch(() => {});
+      this.whatsappService.sendDepositAlert(phone, accNum, amt, bal).catch(() => {});
+    }
+
+    this.logger.log(`[MANUAL] Depot confirme: ${transaction.reference} — ${transaction.amount} XAF`);
+
+    return { success: true, message: 'Depot confirme avec succes' };
+  }
+
+  /**
+   * Rejeter un depot
+   */
+  async rejectDeposit(transactionId: string, reason?: string) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+    });
+
+    if (!transaction) throw new NotFoundException('Transaction non trouvee');
+    if (transaction.status !== 'PENDING') throw new BadRequestException('Cette transaction n\'est plus en attente');
+    if (transaction.type !== 'DEPOSIT') throw new BadRequestException('Ce n\'est pas un depot');
+
+    await this.prisma.transaction.update({
+      where: { id: transactionId },
+      data: { status: 'FAILED', description: `Rejete: ${reason || 'Annule par operateur'}` },
+    });
+
+    this.logger.log(`[MANUAL] Depot rejete: ${transaction.reference}`);
+
+    return { success: true, message: 'Depot rejete' };
   }
 
   // ==================== POLLING JOB — VERIFICATION STATUTS TRANSACTIONS PENDING ====================

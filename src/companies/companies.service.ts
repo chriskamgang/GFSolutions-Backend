@@ -138,7 +138,7 @@ export class CompaniesService {
             phone: payment.employeePhone,
             companyId: data.companyId,
           },
-          include: { accounts: { where: { type: 'CURRENT' } } },
+          include: { accounts: { where: { type: 'SALARY' } } },
         });
 
         if (employee && employee.accounts.length > 0) {
@@ -269,7 +269,7 @@ export class CompaniesService {
             phone: payment.employeePhone,
             employerClientId: data.employerClientId,
           },
-          include: { accounts: { where: { type: 'CURRENT' } } },
+          include: { accounts: { where: { type: 'SALARY' } } },
         });
 
         if (employee && employee.accounts.length > 0) {

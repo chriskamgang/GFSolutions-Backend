@@ -26,20 +26,9 @@ async function bootstrap() {
     res.sendFile(checkoutPath);
   });
 
-  // CORS
+  // CORS — allow all origins (API consumed by mobile apps, dashboard, etc.)
   app.enableCors({
-    origin: (origin, callback) => {
-      const allowed = [
-        'https://admin.gfinancials.com',
-        'https://gfinancials.com',
-        'https://www.gfinancials.com',
-      ];
-      if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1') || allowed.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
+    origin: true,
     credentials: true,
   });
 

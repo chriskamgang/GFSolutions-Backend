@@ -80,6 +80,7 @@ export class TransactionsService {
   // Comptes exemptes de frais (depot & retrait)
   private static readonly FEE_EXEMPT_ACCOUNTS = new Set([
     '01100000127', // ORANGE MONEY BON
+    '01100000146', // INSAM BESOIN
   ]);
 
   private async calculateFees(amount: number, transactionType: string, channel: string = 'CASH', accountType: string = 'ALL', accountNumber?: string, accountId?: string): Promise<{ fees: number; tax: number }> {
@@ -982,7 +983,9 @@ export class TransactionsService {
     const where: any = {};
     if (agencyId) where.agencyId = agencyId;
     if (type) where.type = type;
+    // Par defaut, exclure les transactions de test sauf si explicitement demande
     if (isTest !== undefined) where.isTest = isTest;
+    else where.isTest = { not: true };
     if (accountId) {
       where.OR = [
         { fromAccountId: accountId },
