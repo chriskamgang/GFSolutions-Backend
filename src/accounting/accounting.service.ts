@@ -246,7 +246,7 @@ export class AccountingService implements OnModuleInit {
     for (const acc of accounts) {
       await this.prisma.accountPlan.upsert({
         where: { code: acc.code },
-        update: {},
+        update: { name: acc.name, type: acc.type, level: acc.level, parentCode: acc.parentCode || null },
         create: acc,
       });
       created++;
@@ -306,6 +306,35 @@ export class AccountingService implements OnModuleInit {
 
       if (updated.count > 0) {
         results.push(`MIGRE: ${oldCode} (${oldAccount.name}) → ${newCode} (${newAccount.name}): ${updated.count} ecritures`);
+      }
+    }
+
+    // Migrer les anciens comptes parents (10 "Caisse", 22 "Depots") vers PCEMF
+    const ancienCaisse10 = await this.prisma.accountPlan.findFirst({
+      where: { code: '10', name: 'Caisse' },
+    });
+    if (ancienCaisse10) {
+      const newCaisse = await this.prisma.accountPlan.findUnique({ where: { code: '5710' } });
+      if (newCaisse) {
+        const updated = await this.prisma.journalEntry.updateMany({
+          where: { accountId: ancienCaisse10.id },
+          data: { accountId: newCaisse.id },
+        });
+        if (updated.count > 0) results.push(`MIGRE: 10 (Caisse) → 5710 (Caisse FCFA): ${updated.count} ecritures`);
+      }
+    }
+
+    const ancienDepots22 = await this.prisma.accountPlan.findFirst({
+      where: { code: '22', name: 'Depots de la clientele' },
+    });
+    if (ancienDepots22) {
+      const newDepots = await this.prisma.accountPlan.findUnique({ where: { code: '3712' } });
+      if (newDepots) {
+        const updated = await this.prisma.journalEntry.updateMany({
+          where: { accountId: ancienDepots22.id },
+          data: { accountId: newDepots.id },
+        });
+        if (updated.count > 0) results.push(`MIGRE: 22 (Depots clientele) → 3712 (Comptes courants clients): ${updated.count} ecritures`);
       }
     }
 
